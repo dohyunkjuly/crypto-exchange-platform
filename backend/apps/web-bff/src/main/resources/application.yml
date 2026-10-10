@@ -1,0 +1,141 @@
+server:
+  port: 8081
+  # Behind the edge nginx (deploy/nginx) every request arrives from the proxy's address.
+  # Tomcat's RemoteIp valve puts the X-Forwarded-For client back into getRemoteAddr() -- which
+  # rate limits, IP allowlists and audit rows read -- and the scheme back into isSecure().
+  # Only from the private ranges Tomcat trusts by default, so a header forged from the
+  # internet is ignored. Running with no proxy, a client on this host could forge one; that
+  # is the laptop case and nothing else.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: web-bff
+
+  config:
+    # See open-api's application.yml. Loads the gitignored backend/.env, so that no
+    # secret ever needs to be written into a committed file.
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
+
+  datasource:
+    # The same `exchange` database spot-open-api uses. See its application.yml.
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3308/exchange?serverTimezone=UTC}
+    username: ${DATABASE_USER:exchange}
+    password: ${DATABASE_PASSWORD:exchange}
+
+  jpa:
+    # See open-api's application.yml for why this is `validate` and not `update`.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    # Every app points Flyway at the same migrations. Whichever starts first applies
+    # them; the others see them recorded in flyway_schema_history and do nothing. Flyway
+    # takes a lock, so starting them simultaneously is safe too.
+    #
+    # db/seed (markets, the fee schedule) is added by FLYWAY_LOCATIONS in .env, by the
+    # compose stack and by the tests, never by default: a real deployment lists its own
+    # markets (docs/reference/migrations.md).
+    enabled: true
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+
+  data:
+    mongodb:
+      # Candles only (libs/domain/marketdata). Written by market-data; this app just
+      # reads them. 27018 on the host, not 27017 -- see docker-compose.yml.
+      uri: ${MONGODB_URI:mongodb://localhost:27018/marketdata}
+    redis:
+      # RateLimiter's counters. Explicit rather than relying on Spring Boot's own silent
+      # localhost:6379 default, matching how every other connection here is configured.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  mail:
+    # Read only when exchange.mail.mode is `smtp`; SmtpMailer does not exist otherwise and
+    # Spring never opens a connection at startup, so these being wrong costs nothing until
+    # something actually sends.
+    #
+    # Locally this is Mailpit (docker-compose), which accepts anything and needs no
+    # credentials. In production it is a provider's relay -- smtp.sendgrid.net:587 with
+    # username `apikey` and the API key as the password, or SES/Postmark equivalents. Same
+    # SmtpMailer either way, which is the whole reason for choosing SMTP over an HTTP API.
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          # Off for Mailpit, which has no credentials. A provider relay needs both on, so
+          # production sets them -- and STARTTLS matters: without it the API key used as
+          # the SMTP password crosses the network in the clear.
+          auth: ${MAIL_SMTP_AUTH:false}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS:false}
+          # Without these a dead relay hangs the request that triggered the send -- and
+          # registration sends inside its transaction, so it would hold a database
+          # connection open for as long as the socket waited.
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      # No group-id here on purpose. The only consumer in this app is the live market
+      # socket, and its group must be unique PER INSTANCE -- MarketWsConsumerGroup
+      # explains why a shared one would silently freeze half the charts. A default
+      # sitting here would be a trap for whoever adds the second consumer.
+      #
+      # `latest` because replaying history into a live chart is worse than missing it.
+      # The socket's listener also sets this itself, so it holds even if this default is
+      # changed for some future consumer that does want history.
+      auto-offset-reset: latest
+
+exchange:
+  copy:
+    # What a copy account is funded in, and so the only quote a lead account may trade
+    # (docs/reference/copy-trading.md).
+    quote-asset: USDT
+  google:
+    # The OAuth client id from Google Cloud Console. Unset means Google sign-in is simply
+    # not available -- NimbusGoogleTokenVerifier does not exist and the endpoint says so,
+    # rather than failing in a way that looks like a bad token.
+    #
+    # Not a secret: it is public by design and appears in the browser. What makes it
+    # matter is the audience check -- Google signs ID tokens for every application, so
+    # without comparing `aud` to this exact value, a token minted by anyone else's Google
+    # app would sign someone in here.
+    client-id: ${GOOGLE_CLIENT_ID:}
+  mail:
+    # Which Mailer exists: `log` writes the email to the log (LoggingMailer), `smtp` sends
+    # it (SmtpMailer). Exactly one is created, so there is never any doubt about which one
+    # ran.
+    #
+    # Defaults to `log` so that `./gradlew bootRun` works with no mail server at all --
+    # the verification link appears in the console. docker-compose sets `smtp` and points
+    # at Mailpit, which is the setup worth using once you care what the email looks like.
+    # LoggingMailer logs live links, so production must set this to `smtp`.
+    mode: ${MAIL_MODE:log}
+    # Must be a domain the provider is authorised to send for, or SPF/DKIM fail and the
+    # mail is filtered as spoofed -- which looks like nothing at all from this side.
+    from: ${MAIL_FROM:no-reply@localhost}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

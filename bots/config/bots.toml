@@ -1,0 +1,43 @@
+# What this deployment of the bots decides. An environment variable overrides any of it:
+# BOTS_SPOT_API_URL, BOTS_SPOT_DEV_URL, BOTS_FEED_REST_URL, BOTS_FEED_STREAM_URL,
+# BOTS_ACCOUNTS_FILE, BOTS_LOG_DIR.
+
+[spot]
+api_url = "http://localhost:8080"    # spot-open-api: trading
+dev_url = "http://localhost:8081"    # web-bff: /dev/accounts and /dev/fund, dev profile only
+
+# The public market the bots follow: a REST ticker and a trade stream in the format the large
+# venues share. Point it at whichever you have access to; the one below is public and needs no key.
+[reference_feed]
+rest_url = "https://api.binance.com"
+stream_url = "wss://stream.binance.com:9443"
+
+[accounts]
+file = "config/accounts.json"
+# What "Create bot accounts" in `bots` creates.
+count = 150
+label = "bot"
+fund = "1000000"
+
+[trade_replay]
+# Each market listed takes two accounts: the first keeps the bids, the second the asks, and
+# they trade each print of the feed with each other.
+resting_orders_per_side = 150
+liquidity_min_bps = "5"
+liquidity_max_bps = "300"
+order_notional = "200"
+# A replayed trade, in the quote asset. Small: both sides are ours and both pay the fee.
+trade_notional_min = "10"
+trade_notional_max = "100"
+# true: one trade of ours for every feed print. false: one every trade_interval_seconds at
+# the feed's price then.
+replay_every_trade = false
+trade_interval_seconds = "2"
+# One line: the CLI's "Markets" rewrites this line and only this line.
+symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "BCHUSDT", "DOTUSDT", "LINKUSDT", "LTCUSDT", "TRXUSDT"]
+
+# One market's own values, over the ones above. Sizes are in that market's quote asset.
+[trade_replay.BTCUSDT]
+replay_every_trade = true
+
+

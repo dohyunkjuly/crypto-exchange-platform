@@ -1,0 +1,109 @@
+server:
+  port: 8080
+  # Behind the edge nginx (deploy/nginx) every request arrives from the proxy's address.
+  # Tomcat's RemoteIp valve puts the X-Forwarded-For client back into getRemoteAddr() -- which
+  # rate limits, IP allowlists and audit rows read -- and the scheme back into isSecure().
+  # Only from the private ranges Tomcat trusts by default, so a header forged from the
+  # internet is ignored. Running with no proxy, a client on this host could forge one; that
+  # is the laptop case and nothing else.
+  forward-headers-strategy: native
+
+spring:
+  data:
+    mongodb:
+      # Candles, depth and the trade tape (libs/domain/marketdata). Written by market-data;
+      # this app only reads them. 27018 on the host, not 27017 -- see docker-compose.yml.
+      uri: ${MONGODB_URI:mongodb://localhost:27018/marketdata}
+    redis:
+      # Needed even though this app rate-limits nothing: libs/core's RateLimiter is a
+      # @Component, so scanning com.exchange.core requires a StringRedisTemplate. Explicit
+      # rather than relying on Spring Boot's silent localhost:6379 default, which inside a
+      # container means the container itself and reports DOWN with no clue why.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  application:
+    name: spot-open-api
+
+  config:
+    # Loads backend/.env (gitignored) so secrets never live in this committed file.
+    # Spring, unlike Next.js, does NOT read .env automatically -- this line is what makes
+    # it happen. `optional:` means the app still starts when the file is absent, which is
+    # what you want in production, where real secrets arrive as actual environment
+    # variables from the platform rather than from a file on disk.
+    #
+    # Precedence, highest first: real env var > .env > the defaults below.
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
+
+  datasource:
+    # Port 3308: 3306 is your local MySQL and 3307 is another project's container, so the
+    # compose MySQL stays out of both their ways.
+    #
+    # serverTimezone=UTC on the client matches --default-time-zone=+00:00 on the server.
+    # If those disagree, MySQL silently shifts every timestamp you read.
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3308/exchange?serverTimezone=UTC}
+    username: ${DATABASE_USER:exchange}
+    password: ${DATABASE_PASSWORD:exchange}
+
+  jpa:
+    hibernate:
+      # `validate`, never `update`. Hibernate CAN create and alter tables to match your
+      # Java code, and you must never let it near a table holding credentials or money:
+      # it would reshape the schema based on whatever the code happens to look like today.
+      # Flyway owns the schema; Hibernate may only CHECK that entities still match it, and
+      # fail loudly at startup if they do not.
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    # db/seed is added by FLYWAY_LOCATIONS (.env, compose, the tests) only; see web-bff's application.yml.
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Protobuf gives us bytes; Kafka moves bytes. No JSON in between.
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      # The broker acknowledges only once every in-sync replica has the order. Anything
+      # weaker means a broker crash can lose an order we already told the client we
+      # accepted.
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      # Its own group, separate from web-bff's: each app receives every event and builds
+      # its own independent view. Had they SHARED a group, Kafka would split the events
+      # between them and each would see only half the market.
+      group-id: spot-open-api
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      auto-offset-reset: earliest
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+exchange:
+  copy:
+    # What a copy account is funded in, and so the only quote a lead account may trade
+    # (docs/reference/copy-trading.md).
+    quote-asset: USDT
+  # The public rate limits, echoed by GET /v1/markets/info and enforced by the interceptor
+  # (docs/reference/api-signing-and-limits.md "Rate limits"). One place, so what is published is
+  # what is enforced.
+  # Env-overridable so the local stack can lift them for bots/ without touching this file.
+  # The weight budget is per IP, so every bot in one container shares one; the order budgets
+  # are per key. A real deployment sets none of these and gets the values below.
+  rate-limit:
+    request-weight-per-minute: ${RATE_LIMIT_WEIGHT_PER_MINUTE:1200}
+    orders-per-ten-seconds: ${RATE_LIMIT_ORDERS_PER_10S:100}
+    orders-per-day: ${RATE_LIMIT_ORDERS_PER_DAY:1000}
+    # Every bot on one machine is one IP, and each account it trades holds a socket of its own.
+    ws-connections-per-ip: ${RATE_LIMIT_WS_CONNECTIONS_PER_IP:20}

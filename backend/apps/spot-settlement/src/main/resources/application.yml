@@ -1,0 +1,179 @@
+# No spring.main.web-application-type: none, on purpose, even though this app's actual
+# job -- consuming exchange.spot.events.v1 and writing balances/orders -- has no HTTP
+# surface. Spring Boot's actuator only stands up a management server -- same port or a
+# separate one, does not matter -- when the main context is itself a web application;
+# set web-application-type: none and it refuses to create one at all (verified via
+# --debug's own condition-evaluation report on spot-matching-engine's identical setup:
+# "Management Port non web application context (OnManagementPortCondition)"). So this
+# app IS a minimal servlet web app on the port below -- just one with nothing
+# registered on it except actuator's own health endpoint (management.endpoints.web.
+# exposure.include, further down). No controller, no other endpoint exists to be
+# reachable there.
+server:
+  port: ${SETTLEMENT_MANAGEMENT_PORT:8091}
+
+spring:
+  data:
+    redis:
+      # Needed even though this app rate-limits nothing: libs/core's RateLimiter is a
+      # @Component, so scanning com.exchange.core requires a StringRedisTemplate. Explicit
+      # rather than relying on Spring Boot's silent localhost:6379 default, which inside a
+      # container means the container itself and reports DOWN with no clue why.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  application:
+    name: spot-settlement
+
+  task:
+    scheduling:
+      pool:
+        # Spring Boot's default is one thread for every @Scheduled method in the app. The
+        # nightly tier recount can run for minutes, and on one thread the fee sweep would wait
+        # behind it; on two, it does not. Settling fills is on Kafka's threads, not these.
+        size: 2
+
+  config:
+    # See spot-open-api's application.yml. Same .env, so KAFKA_BOOTSTRAP_SERVERS and
+    # the DATABASE_* vars are each set in exactly one place for every app that needs
+    # them, not once per app.
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3308/exchange?serverTimezone=UTC}
+    username: ${DATABASE_USER:exchange}
+    password: ${DATABASE_PASSWORD:exchange}
+    hikari:
+      # A chosen number, not Spring Boot's default (10) left in place by accident: this
+      # pool is the real parallelism ceiling for EventConsumer's per-batch dispatch of
+      # order and (userId, assetId) balance groups across virtual threads -- however
+      # many connections exist is how many groups can genuinely be in flight at once, no
+      # matter how many virtual threads are submitted. Raised from 20 to 60 after
+      # measuring both directions against real infra, not guessed: 60 settled a benchmark
+      # of many independent trades ~5-10% faster than 20 (and the
+      # whale benchmark similarly), the local MySQL's own max_connections (151) and this
+      # box's core count leave headroom for it, and the cost -- more concurrent
+      # first-touch wallet_balances inserts racing each other, so more transient
+      # deadlocks -- is already handled by EventConsumer#withDeadlockRetry, confirmed by
+      # the same benchmark run staying at zero whole-batch redeliveries at this size.
+      maximum-pool-size: ${SETTLEMENT_DB_POOL_SIZE:60}
+
+  jpa:
+    hibernate:
+      # Same reasoning as spot-open-api: Flyway owns the schema, Hibernate only checks
+      # entities still match it.
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          # OrderEffectService#applyFillsForOrder's saveAll(logs) -- potentially
+          # hundreds of SpotOrderFillLog rows for one order in one batch -- needs this
+          # to actually collapse into fewer round trips instead of one INSERT per row.
+          # Confirmed working via Hibernate's own batch statistics, not assumed: it did
+          # NOT work until SpotOrderFillLog.createdAt stopped being DB-generated (see
+          # that field's own comment) -- a generated value read back after each insert
+          # defeats batching the same way an IDENTITY id does, silently, no error either
+          # way.
+          batch_size: 200
+
+  flyway:
+    enabled: true
+    # db/seed is added by FLYWAY_LOCATIONS (.env, compose, the tests) only; see web-bff's application.yml.
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      # Added when BalanceService began announcing balance changes. Until then this app only
+      # consumed, so there was no producer config -- and Spring Boot's default value
+      # serializer is StringSerializer, which cannot take the byte[] a protobuf message
+      # serialises to. Every announcement failed with a SerializationException, caught and
+      # logged as designed, so nothing broke and nothing was published either. The warning
+      # was the only evidence.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      # acks=1, not all. The command and event topics use all because losing a message there
+      # costs an order or a projection; this topic is notifications whose content is already
+      # committed in MySQL and served over REST, so waiting for every replica buys nothing
+      # and spends latency on the thread that just finished settling money.
+      acks: "1"
+      properties:
+        # A dead broker must fail fast rather than stall. The default is 60 seconds of
+        # blocking once the producer's buffer fills, which on a settlement thread is an
+        # outage; one second turns it into a dropped notification, which is what this topic
+        # is allowed to be.
+        max.block.ms: 1000
+        # Kafka refuses to build a producer unless delivery.timeout.ms >= linger.ms +
+        # request.timeout.ms, and request.timeout.ms defaults to 30s -- so a short delivery
+        # timeout has to bring the request timeout down with it. Setting only the first one
+        # fails at producer construction, not at startup: the app comes up fine and every
+        # announcement throws on the publishing thread.
+        request.timeout.ms: 2000
+        delivery.timeout.ms: 5000
+    consumer:
+      # Its own group -- the one and only writer of wallet/order state from this
+      # stream, never shared with web-bff's or spot-open-api's already-reserved (and
+      # differently purposed) groups.
+      group-id: spot-settlement
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      auto-offset-reset: earliest
+      # We commit the offset ourselves, only after every group in a batch has been
+      # durably written. With auto-commit, a crash mid-batch could leave the offset
+      # saying "done" for writes that never happened.
+      enable-auto-commit: false
+      properties:
+        # Default is 500 -- one whale order fragmenting into ~1000+ fills for a single
+        # symbol then spans two polls (two full resolve/dispatch/wait/ack cycles)
+        # instead of one, purely because of this cap, not because the DB can't keep up.
+        # Raised, not maxed out: this is a total cap across every partition this
+        # consumer owns (8 today), not "N per symbol" -- in a busy system with many
+        # symbols trading at once, it does NOT guarantee one symbol's own burst lands
+        # in a single batch, it only makes that more likely. Kept well short of
+        # something like 10_000 on purpose: EventConsumer aborts and redelivers the
+        # WHOLE batch on any single failure (see its own javadoc), so a bigger batch is
+        # also a bigger unit of wasted, repeated work the one time something in it
+        # fails.
+        max.poll.records: 2000
+    listener:
+      type: batch
+      ack-mode: manual
+      # No static partition assignment here, unlike spot-matching-engine -- this
+      # consumer holds no in-memory per-partition state, so ordinary rebalance-on-scale
+      # is safe. Normal subscribe, normal group coordination.
+
+      # Same trio, same reasoning, as spot-matching-engine's application.yml: lets
+      # health.ConsumerLivenessHealthIndicator distinguish a listener thread that has
+      # stopped calling poll() entirely from one that's polling normally on a batch
+      # with nothing new to consume.
+      poll-timeout: 3000
+      no-poll-threshold: 3
+      monitor-interval: 10s
+
+# Fee revenue reaching the exchange's own account (docs/reference/treasury.md). The sweep
+# interval is how stale the admin page's revenue figure can be; the rollup only has to keep
+# up with the clock, since it summarises hours that have already closed.
+exchange:
+  treasury:
+    fee-account-email: fees@exchange
+    sweep-interval-ms: 60000
+    rollup-interval-ms: 300000
+    # Reconciliation sums the whole ledger, so nightly and off the hour -- not on it, where
+    # every other scheduled thing in every system tends to pile up.
+    verify-cron: "0 17 3 * * *"
+
+  # The nightly fee-tier job (docs/reference/fee-tiers.md). After midnight UTC, once the day it
+  # recounts has closed, and off the hour for the same reason as verify-cron. Volume is
+  # measured in one asset; a market quoted in anything else is converted at that day's close.
+  fee:
+    tier-cron: "0 20 0 * * *"
+    volume-asset: USDT
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only health -- same reasoning as spot-matching-engine's application.yml.
+        # Nothing today needs /metrics or /env, and every endpoint exposed here is one
+        # more thing this process answers over the network for no current benefit.
+        include: health

@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/*
+ * Dark by default, not "follow the system". An exchange is a dark product -- every large venue
+ * defaults dark regardless of OS setting, and a trader who lands on a white order book
+ * assumes something is broken. Light is an explicit opt-in via data-theme on <html>.
+ *
+ * There is deliberately NO accent colour. Monochrome, which resolves a real problem
+ * rather than avoiding one: green and red are spoken for by price direction, so any brand hue
+ * competes with them. Here the rule is absolute -- if something on screen is coloured, it is a
+ * price. Hierarchy comes from fill and border, never hue.
+ */
+:root {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --surface: #121212;
+  --surface-raised: #1a1a1a;
+  --border: #2a2a2a;
+  --border-strong: #3d3d3d;
+  --text: #ffffff;
+  --text-muted: #8f8f8f;
+  --text-dim: #5c5c5c;
+
+  --up: #16c784;
+  --down: #ea3943;
+  /* Depth-bar fills, painted behind a row rather than as a separate element. */
+  --up-soft: rgba(22, 199, 132, 0.12);
+  --down-soft: rgba(234, 57, 67, 0.12);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --surface: #f7f7f7;
+  --surface-raised: #f0f0f0;
+  --border: #e4e4e4;
+  --border-strong: #cfcfcf;
+  --text: #0d0d0d;
+  --text-muted: #707070;
+  --text-dim: #9a9a9a;
+
+  /* Not the dark values reused: #16c784 on white fails contrast. A price has to survive being
+     read, not merely look green. */
+  --up: #0ea968;
+  --down: #d6293e;
+  --up-soft: rgba(14, 169, 104, 0.1);
+  --down-soft: rgba(214, 41, 62, 0.1);
+}
+
+/*
+ * `inline` so the utilities compile to var() references rather than copying the hex. That is what
+ * lets one attribute on <html> repaint the whole app -- with a non-inline @theme, Tailwind would
+ * bake today's values into every class and the light override would do nothing.
+ */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-dim: var(--text-dim);
+
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-up-soft: var(--up-soft);
+  --color-down-soft: var(--down-soft);
+
+  /* Its own token even though it currently equals --down. A form error and a falling price are
+     never adjacent, so sharing red is fine -- but if they ever need to differ, this changes in one
+     place instead of across every call site. */
+  --color-danger: var(--down);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/*
+ * Denser than Tailwind's defaults, which start at 14px and suit a marketing page. A trading UI
+ * runs 12-13px: more rows visible without scrolling is the whole point. Overriding the scale
+ * rather than rewriting every call site means existing `text-sm` becomes 12px for free.
+ */
+@theme {
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  /* The template shipped `Arial, Helvetica, sans-serif` here, which silently overrode the Geist
+     that layout.tsx downloads -- two font families fetched over the network and then not used. */
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--text-base);
+}
+
+/* Tailwind 4's preflight gives buttons the default arrow, so a plain text button reads as a
+   label that happens to do nothing. Every enabled button is clickable and should say so. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+/*
+ * Every digit the same width, so a price column does not shuffle sideways each time a figure
+ * ticks. One declaration, and it does more for "this looks like an exchange" than any colour --
+ * proportional digits in a live order book read as broken even when nobody can say why.
+ */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Brand assets ship as separate white/black files; show the one matching the theme. */
+.brand-dark { display: block; }
+.brand-light { display: none; }
+[data-theme="light"] .brand-dark { display: none; }
+[data-theme="light"] .brand-light { display: block; }
+
+/* Auth-page brand panel: a dot grid after the wordmark, fading out so the copy sits on calm ground. */
+.dotgrid {
+  background-image: radial-gradient(var(--border-strong) 1.1px, transparent 1.1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 70% 60% at 30% 35%, #000 20%, transparent 75%);
+  opacity: 0.9;
+}
+
+/*
+ * A scrollbar with no track. The default paints one the full width of the gutter, which on a
+ * card with no fill of its own reads as a stripe down its edge that appears only when the
+ * content happens to overflow. Thumb alone, in the theme's own colours.
+ */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.scroll-slim::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-slim::-webkit-scrollbar-track { background: transparent; }
+.scroll-slim::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
+.scroll-slim::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }

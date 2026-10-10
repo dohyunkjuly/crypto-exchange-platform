@@ -1,0 +1,96 @@
+# No spring.main.web-application-type: none, for the same verified reason spelled out in
+# spot-settlement's and spot-matching-engine's application.yml: actuator only stands up a
+# management server when the main context is itself a web application. So this app IS a
+# minimal servlet web app on the port below -- with nothing registered on it except
+# actuator's health endpoint. No controller, no other endpoint exists to be reachable.
+server:
+  port: ${MARKET_DATA_MANAGEMENT_PORT:8092}
+
+spring:
+  application:
+    name: market-data
+
+  config:
+    # Same .env as every other app, so KAFKA_BOOTSTRAP_SERVERS and MONGODB_URI are each
+    # set in exactly one place rather than once per app.
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
+
+  data:
+    mongodb:
+      # 27018 on the host (see docker-compose.yml for why it is not 27017). Inside the
+      # compose network it is mongo:27017.
+      uri: ${MONGODB_URI:mongodb://localhost:27018/marketdata}
+      auto-index-creation: true
+
+    redis:
+      # Needed even though this app rate-limits nothing: libs/core's RateLimiter is a
+      # @Component, so scanning com.exchange.core requires a StringRedisTemplate. Explicit
+      # rather than relying on Spring Boot's silent localhost:6379 default, which inside a
+      # container means the container itself and reports DOWN with no clue why.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      # exchange.spot.depth.v1 only: each level's new size after a fold, for open-api's
+      # full-ladder feed. Protobuf bytes, keyed by symbol. acks=1 rather than all -- the topic
+      # is allowed to drop messages (a client resyncs from the stored book), and the write it
+      # follows must not wait on replication for a feed.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      acks: "1"
+    consumer:
+      # Its own group, entirely separate from spot-settlement's. Both apps read every
+      # event on this topic; Kafka tracks their progress independently, so neither can
+      # slow down or block the other, and this one falling behind never touches money.
+      group-id: market-data
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      # earliest, and it means something stronger here than in settlement: candles are a
+      # pure projection, so a brand-new deployment replaying the whole topic from the
+      # start is exactly how the collection gets built in the first place.
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        # Same reasoning as spot-settlement's: a bigger batch means more trades folded
+        # into each bucket's single upsert. The ceiling on wasted work when a batch fails
+        # is lower here, though -- redoing candle aggregation is idempotent and cheap.
+        max.poll.records: 2000
+    listener:
+      type: batch
+      ack-mode: manual
+      # One listener thread per partition of exchange.spot.events.v1, measured rather
+      # than assumed (80,000 trades over 16 symbols against real Kafka and MongoDB, three
+      # runs each): concurrency 1 ~51k trades/s, 4 ~93k, 8 ~250k+. At 8 each thread owns
+      # exactly one partition; at 4 each has to work through two partitions' records
+      # serially inside one onEvents call.
+      #
+      # Safe here in a way it explicitly is NOT for spot-matching-engine, which is pinned
+      # to concurrency 1 because its OrderBook lives in RAM and is not thread-safe. The
+      # difference is not that this app is stateless -- DepthWriter does hold a book per
+      # symbol in memory -- but that a symbol always maps to one partition and Kafka gives
+      # a partition to exactly one thread, so two threads never touch the same candle
+      # bucket or the same book. Each writer's lastSequence guard, and DepthWriter's
+      # per-book lock, cover the rebalance window where two consumers can briefly both
+      # believe they own a partition.
+      #
+      # Threads within one process are fine; a second PROCESS is not. See
+      # MarketDataApplication.
+      #
+      # Raising this past the partition count buys nothing -- Kafka gives one partition to
+      # exactly one consumer, so extra threads simply idle. Keep the two numbers in step.
+      concurrency: ${MARKET_DATA_CONCURRENCY:8}
+      # The same trio, for the same reason, as the other two Kafka apps: it lets
+      # health.ConsumerLivenessHealthIndicator tell a listener thread that has stopped
+      # polling apart from one polling normally with nothing to consume.
+      poll-timeout: 3000
+      no-poll-threshold: 3
+      monitor-interval: 10s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only health -- same reasoning as the other apps. Every endpoint exposed here is
+        # one more thing this process answers over the network for no current benefit.
+        include: health

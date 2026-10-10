@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package exchange.spot.v1;
+
+option java_package = "com.exchange.contracts.spot.v1";
+option java_multiple_files = true;
+
+// Shared vocabulary for spot commands and events.
+//
+// Rules that apply to every message in this package:
+//
+//   * Money is int64 scaled by 1e8. 1.5 BTC is 150000000. Never a double, never a
+//     string on the wire -- the REST boundary converts, nothing in here does.
+//
+//   * Ids are 16 raw bytes: a ULID, assigned by the API before anything is written.
+//     Compact, and identical to the BINARY(16) columns they land in.
+//
+//   * Timestamps are microseconds since the epoch, UTC, matching TIMESTAMP(6) in MySQL.
+//
+//   * Enums always reserve 0 for UNSPECIFIED. proto3 cannot distinguish an unset enum
+//     from its first value, so a real value at 0 would make "field missing" and "field
+//     is BUY" indistinguishable.
+//
+//   * NEVER renumber a field or reuse a number. Renaming is safe -- the wire format
+//     carries numbers, not names -- but a reused number silently reinterprets every
+//     historical message in the log.
+
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  SIDE_BUY = 1;
+  SIDE_SELL = 2;
+}
+
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  ORDER_TYPE_LIMIT = 1;
+  ORDER_TYPE_MARKET = 2;
+  ORDER_TYPE_STOP_LOSS = 3;
+  ORDER_TYPE_STOP_LOSS_LIMIT = 4;
+  ORDER_TYPE_TAKE_PROFIT = 5;
+  ORDER_TYPE_TAKE_PROFIT_LIMIT = 6;
+  // Rejected outright if it would cross, so it can only ever be a maker.
+  ORDER_TYPE_LIMIT_MAKER = 7;
+}
+
+enum TimeInForce {
+  TIME_IN_FORCE_UNSPECIFIED = 0;
+  // Rests until filled or cancelled.
+  TIME_IN_FORCE_GTC = 1;
+  // Fills what it can immediately, cancels the rest.
+  TIME_IN_FORCE_IOC = 2;
+  // Fills entirely and immediately, or not at all.
+  TIME_IN_FORCE_FOK = 3;
+  // Rests until a deadline.
+  TIME_IN_FORCE_GTD = 4;
+}
+
+// How the engine should behave when an incoming order would match against the same
+// user's own resting order. Set by the client on PlaceOrder; EXPIRE_MAKER if left unset.
+// There is no mode that allows a self-trade: settlement records a trade as one buyer and
+// one seller.
+enum SelfTradePreventionMode {
+  SELF_TRADE_PREVENTION_MODE_UNSPECIFIED = 0;
+  // Cancels the incoming order's remaining quantity the moment it would self-match.
+  // Whatever it already filled against other users stands.
+  SELF_TRADE_PREVENTION_MODE_EXPIRE_TAKER = 1;
+  // Cancels the resting order it would have matched against, and keeps walking the book
+  // for the incoming order. See CANCEL_REASON_SELF_TRADE_PREVENTION.
+  SELF_TRADE_PREVENTION_MODE_EXPIRE_MAKER = 2;
+  // Cancels both: the resting order it collided with, and its own remaining quantity.
+  // Not allowed with FOK, which must have no side effects when it cannot fill.
+  SELF_TRADE_PREVENTION_MODE_EXPIRE_BOTH = 3;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_NEW = 1;
+  ORDER_STATUS_PARTIALLY_FILLED = 2;
+  ORDER_STATUS_FILLED = 3;
+  ORDER_STATUS_CANCELED = 4;
+  ORDER_STATUS_REJECTED = 5;
+  ORDER_STATUS_EXPIRED = 6;
+}
+
+// Why the engine refused an order. Validation the API can do -- tick size, notional,
+// balance -- happens before the command is published and never reaches here; these are
+// only the reasons that require the book.
+enum RejectReason {
+  REJECT_REASON_UNSPECIFIED = 0;
+  // A LIMIT_MAKER that would have crossed the spread.
+  REJECT_REASON_WOULD_TAKE = 1;
+  // FOK that could not be filled in full from other users' orders.
+  REJECT_REASON_INSUFFICIENT_LIQUIDITY = 2;
+  // The same order id was already accepted -- a replayed or duplicated command.
+  REJECT_REASON_DUPLICATE_ORDER_ID = 3;
+  REJECT_REASON_UNKNOWN_SYMBOL = 4;
+  // The market is halted or cancel-only.
+  REJECT_REASON_MARKET_NOT_TRADING = 5;
+  // FOK under EXPIRE_TAKER whose walk reaches the user's own order before it fills in
+  // full. Nothing is cancelled. Every other order is accepted and then expired instead
+  // (see CANCEL_REASON_SELF_TRADE_PREVENTION).
+  REJECT_REASON_SELF_TRADE = 6;
+  // A stop or take-profit whose trigger price is already on the wrong side of the
+  // market, so it would fire the instant it was accepted. Almost always an inverted
+  // direction or a stale price on the client's side -- and if immediate execution were
+  // wanted, a market order says so. Same shape of check as WOULD_TAKE: the order's
+  // premise is already false, so refuse it rather than do something surprising.
+  //
+  // Also returned when the market has never traded, so there is no price to evaluate
+  // the condition against at all.
+  REJECT_REASON_WOULD_TRIGGER_IMMEDIATELY = 7;
+  // The engine cannot handle this order type. Today: the conditional types, which need
+  // a trigger book that does not exist yet. Distinct from a validation failure -- the
+  // order is well formed, this venue just cannot execute it.
+  REJECT_REASON_UNSUPPORTED_ORDER_TYPE = 8;
+}
+
+// Why the engine refused an amend. The order is untouched in every case.
+enum AmendRejectReason {
+  AMEND_REJECT_REASON_UNSPECIFIED = 0;
+  // Already filled or cancelled by the time the amend arrived. An ordinary race.
+  AMEND_REJECT_REASON_ORDER_NOT_FOUND = 1;
+  // It filled past the new total while the amend was on its way.
+  AMEND_REJECT_REASON_QUANTITY_NOT_ABOVE_FILLED = 2;
+  // A LIMIT_MAKER whose new price would cross the spread.
+  AMEND_REJECT_REASON_WOULD_TAKE = 3;
+  // A conditional order whose new stop price is already on the wrong side of the market.
+  AMEND_REJECT_REASON_WOULD_TRIGGER_IMMEDIATELY = 4;
+  // The field cannot change on this order: a trailing order's trigger, a stop price on a
+  // resting order. The API refuses these first; this is for a command that bypassed it.
+  AMEND_REJECT_REASON_FIELD_NOT_AMENDABLE = 5;
+}
+
+// Why an order left the book without being filled.
+enum CancelReason {
+  CANCEL_REASON_UNSPECIFIED = 0;
+  CANCEL_REASON_USER_REQUESTED = 1;
+  // IOC remainder, after the immediate portion filled.
+  CANCEL_REASON_IOC_REMAINDER = 2;
+  // GTD deadline passed.
+  CANCEL_REASON_EXPIRED = 3;
+  // Market delisted or force-cancelled by an operator.
+  CANCEL_REASON_MARKET_CLOSED = 4;
+  CANCEL_REASON_ADMIN = 5;
+  // Self-trade prevention withdrew this order rather than let it match against its own
+  // owner's order on the other side. Which one gives way -- the resting maker, the
+  // incoming taker, or both -- depends on the taker's requested SelfTradePreventionMode.
+  // Without this value a user sees a cancellation they never requested and no
+  // explanation for it.
+  CANCEL_REASON_SELF_TRADE_PREVENTION = 6;
+}

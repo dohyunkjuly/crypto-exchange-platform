@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package exchange.spot.v1;
+
+import "exchange/spot/v1/common.proto";
+
+option java_package = "com.exchange.contracts.spot.v1";
+option java_multiple_files = true;
+
+// exchange.spot.snapshots.v1 -- the engine's state, so recovery does not have to replay
+// from the beginning of time.
+//
+// Rebuilding from offset 0 is correct and gets slower forever. A snapshot records the
+// book plus the command offset it reflects, so a restart seeks past everything the
+// snapshot already contains.
+//
+// The unit is a PARTITION, not a symbol. Recovery seeks a partition to an offset, so a
+// snapshot has to describe every symbol in that partition at one consistent point --
+// a per-symbol snapshot could not be restored to a single seek position.
+//
+// This is an optimisation, not part of the state machine: taking one at a different
+// moment changes nothing about the resulting state. So unlike everything else the engine
+// does, snapshot timing does not have to be deterministic.
+//
+// WHERE THE BYTES LIVE. A BookSnapshot is not itself put on a Kafka topic. One snapshot
+// carries an entire partition's book, and a Kafka record is capped at 1 MB -- roughly
+// 16,000 resting orders -- which a real market passes without ceremony. The serialized
+// BookSnapshot goes to object storage, and a SnapshotPointer naming it goes on
+// exchange.spot.snapshot-pointers.v1. That keeps the addressing scheme (partition number
+// is the partition number, newest record wins) while removing the size ceiling.
+
+message BookSnapshot {
+  int32 partition = 1;
+
+  // The command offset this reflects. Recovery restores this state and resumes at
+  // offset + 1, so the snapshot must be taken AFTER that command was fully processed.
+  int64 offset = 2;
+
+  int64 timestamp_us = 3;
+
+  repeated SymbolSnapshot symbols = 4;
+}
+
+message SymbolSnapshot {
+  string symbol = 1;
+
+  // Where this market's event sequence had reached. Restoring it is what stops a restart
+  // emitting sequence 1 again and making every consumer think it missed a gap.
+  int64 sequence = 2;
+
+  // Zero if the market has not traded. Conditional orders cannot be evaluated without it.
+  int64 last_trade_price = 3;
+
+  // IN BOOK ORDER, best price first and oldest first within a price. Time priority is
+  // position in this list, so restoring must re-insert in exactly this order -- shuffle
+  // it and resting orders silently change places in the queue.
+  repeated RestingOrder resting = 4;
+
+  repeated ConditionalOrder pending = 5;
+
+  // The ids of the last commands this market processed, oldest first: what the engine
+  // dedupes against (see Command.command_id). Restored, or a restart forgets everything it
+  // did before the crash and a retried publish that lands afterwards is matched again.
+  repeated bytes recent_command_ids = 6;
+}
+
+message RestingOrder {
+  bytes order_id = 1;
+  int64 user_id = 2;
+  Side side = 3;
+  OrderType order_type = 4;
+  TimeInForce time_in_force = 5;
+  int64 price = 6;
+
+  // Both, not just the remainder: a restored order still has to report how much of the
+  // original it has filled.
+  int64 quantity = 7;
+  int64 remaining = 8;
+
+  // Stamped when this order was placed. Without them a restored maker would be charged
+  // whatever rate the next taker happens to carry.
+  int32 maker_fee_bps = 9;
+  int32 taker_fee_bps = 10;
+
+  optional string client_order_id = 11;
+  SelfTradePreventionMode self_trade_prevention_mode = 12;
+}
+
+message ConditionalOrder {
+  bytes order_id = 1;
+  int64 user_id = 2;
+  Side side = 3;
+  OrderType order_type = 4;
+  TimeInForce time_in_force = 5;
+  int64 stop_price = 6;
+  // Zero for the plain stop types, which become market orders when they fire.
+  int64 limit_price = 7;
+  int64 quantity = 8;
+  int32 maker_fee_bps = 9;
+  int32 taker_fee_bps = 10;
+  optional string client_order_id = 11;
+  SelfTradePreventionMode self_trade_prevention_mode = 12;
+
+  // Trailing orders only -- see PlaceOrder.trailing_delta_bps.
+  optional int32 trailing_delta_bps = 13;
+  // The best price seen since this order started trailing. Set only once it is
+  // ACTIVELY trailing -- absent means it is still waiting for stop_price (its
+  // activation price) to be reached. Restoring this, not just last_trade_price, is
+  // what stops a restart resetting an order's tracked extreme back to the current
+  // price and silently loosening its stop.
+  optional int64 extreme_price = 14;
+
+  // A quote-asset budget instead of a base quantity in `quantity` -- only ever set on
+  // a plain STOP_LOSS/TAKE_PROFIT (which fires as a quote-quantity MARKET order); the
+  // *_LIMIT variants fire at a fixed price, where a base quantity is unambiguous. See
+  // PlaceOrder.quote_order_qty.
+  optional int64 quote_order_qty = 15;
+}
+
+// The Kafka-side record: a few dozen bytes saying where a BookSnapshot actually is.
+//
+// Written to the SAME partition number as the snapshot it names, so recovery for command
+// partition 3 reads the last record of pointer partition 3 -- one poll, no scan.
+//
+// Ordering is a correctness requirement, not a preference: the object must be durable in
+// storage BEFORE its pointer is published. A pointer naming an object that does not exist
+// yet is a snapshot that looks valid and cannot be read.
+message SnapshotPointer {
+  int32 partition = 1;
+
+  // The command offset the referenced snapshot reflects. Duplicated from the snapshot
+  // itself so recovery can log and reason about it without fetching the object first.
+  int64 offset = 2;
+
+  int64 timestamp_us = 3;
+
+  // Object key within the configured bucket. Derived from partition and offset rather
+  // than random, so an operator can find the object for a given offset by hand.
+  string key = 4;
+
+  // Sanity check on the fetch. Protobuf parsing catches most truncation, but a short read
+  // that happens to parse is worse than one that fails, and this catches it.
+  int64 size_bytes = 5;
+}

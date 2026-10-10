@@ -1,0 +1,55 @@
+server:
+  port: 8083
+  # Behind the edge nginx (deploy/nginx) every request arrives from the proxy's address.
+  # Tomcat's RemoteIp valve puts the X-Forwarded-For client back into getRemoteAddr() -- which
+  # rate limits, IP allowlists and audit rows read -- and the scheme back into isSecure().
+  # Only from the private ranges Tomcat trusts by default, so a header forged from the
+  # internet is ignored. Running with no proxy, a client on this host could forge one; that
+  # is the laptop case and nothing else.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: admin-bff
+
+  config:
+    # See open-api's application.yml. Loads the gitignored backend/.env, so that no
+    # secret ever needs to be written into a committed file.
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
+
+  datasource:
+    # The same `exchange` database every app uses. See open-api's application.yml.
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3308/exchange?serverTimezone=UTC}
+    username: ${DATABASE_USER:exchange}
+    password: ${DATABASE_PASSWORD:exchange}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+exchange:
+  # How many partitions the engine's commands topic has (its engine.partition-count): a new
+  # market's partition must be one of them. Read from config because this app has no Kafka.
+  engine:
+    partition-count: ${ENGINE_PARTITION_COUNT}
+
+  # The exchange's own accounts, read for the treasury screen. The same two rows
+  # spot-settlement sweeps into (docs/reference/treasury.md); nothing is written here.
+  treasury:
+    fee-account-email: fees@exchange
+    treasury-account-email: treasury@exchange
+
+  cors:
+    # The admin/ Next app, and nothing else. Never the customer site.
+    allowed-origin: ${ADMIN_WEB_ORIGIN:http://localhost:3001}

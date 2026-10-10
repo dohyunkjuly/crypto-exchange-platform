@@ -1,0 +1,54 @@
+# Runs only when web/ changes, so a backend commit no longer pays for a Next.js build.
+# The path list is repeated under both events: GitHub's parser has no YAML anchors.
+name: Web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - "!web/**.md"
+      - .github/workflows/ci-web.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - web/**
+      - "!web/**.md"
+      - .github/workflows/ci-web.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+
+      - name: Test
+        working-directory: web
+        run: npm test
+
+      - name: Build
+        working-directory: web
+        env:
+          # lib/env.ts refuses to build without it, on purpose. The value is irrelevant to
+          # a build check but must be a real URL; nothing here is deployed.
+          NEXT_PUBLIC_BFF_URL: http://localhost:8081
+          NEXT_PUBLIC_EXCHANGE_NAME: Crypto Exchange
+        run: npm run build

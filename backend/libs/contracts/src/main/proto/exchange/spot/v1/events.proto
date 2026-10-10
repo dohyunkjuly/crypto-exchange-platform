@@ -1,0 +1,220 @@
+syntax = "proto3";
+
+package exchange.spot.v1;
+
+import "exchange/spot/v1/common.proto";
+
+option java_package = "com.exchange.contracts.spot.v1";
+option java_multiple_files = true;
+
+// exchange.spot.events.v1 -- everything the engine did. THE single source of truth.
+//
+// One topic, not one per event type. Ordering has to hold ACROSS types: a trade removes
+// quantity that an accept put on the book, so a consumer maintaining depth must see them
+// in the order they happened. Split them across topics and every book built from this
+// feed is wrong.
+//
+// These are facts in the past tense. Nothing here can fail or be retracted -- including
+// OrderRejected, which is itself a fact that a rejection occurred.
+//
+// The engine has exactly ONE output topic. L2 depth, L1 top-of-book, aggregate trades and
+// candles are all projections built downstream from these events; the engine never
+// aggregates and never emits a rendered order book.
+
+message Event {
+  // The partition key, and the same value the originating command carried.
+  string symbol = 1;
+
+  // Per-symbol, monotonic, dense. Three jobs:
+  //   * total order, because two events can share a microsecond
+  //   * gap detection -- a consumer seeing 100 then 102 knows it lost one and resyncs
+  //   * idempotency -- (symbol, sequence) is unique, so a redelivered event cannot be
+  //     applied twice
+  int64 sequence = 2;
+
+  // Derived from the triggering command's timestamp, never from a clock. Replay must
+  // reproduce these exactly.
+  int64 timestamp_us = 3;
+
+  // Echoes Command.command_id so a consumer can tie an outcome to its request.
+  bytes command_id = 4;
+
+  oneof payload {
+    OrderAccepted order_accepted = 10;
+    OrderRejected order_rejected = 11;
+    TradeExecuted trade_executed = 12;
+    OrderCanceled order_canceled = 13;
+    OrderAmended order_amended = 14;
+    OrderAmendRejected order_amend_rejected = 15;
+  }
+}
+
+// The order is now resting on the book. THIS is what depth is made of -- most orders
+// never trade, and a feed carrying only fills could not build L2 at all.
+message OrderAccepted {
+  bytes order_id = 1;
+  int64 user_id = 2;
+
+  Side side = 3;
+  OrderType order_type = 4;
+  TimeInForce time_in_force = 5;
+
+  optional int64 price = 6;
+  int64 quantity = 7;
+
+  // What actually rested. Below quantity when the order crossed on arrival and this is
+  // the remainder; zero-quantity remainders are not accepted at all.
+  int64 resting_quantity = 8;
+
+  optional string client_order_id = 9;
+
+  // True when the order was parked in the trigger book instead of resting (resting_quantity
+  // is then zero). The fields below are what it waits on, so a consumer can show the order
+  // without reading it back from the database. Unset on a resting order.
+  bool pending_trigger = 10;
+  // The trigger price, or a trailing order's activation price; absent on a trailing order
+  // that tracks from acceptance.
+  optional int64 stop_price = 11;
+  optional int32 trailing_delta_bps = 12;
+  // A quote-sized order's budget. quantity then holds the same number, not a base amount.
+  optional int64 quote_order_qty = 13;
+}
+
+message OrderRejected {
+  bytes order_id = 1;
+  int64 user_id = 2;
+  RejectReason reason = 3;
+  // Free text for humans. Never parse it -- switch on reason.
+  string message = 4;
+  optional string client_order_id = 5;
+}
+
+// Two orders crossed.
+//
+// The engine reports taker and maker because that is what it knows: one side rested and
+// provided liquidity, the other crossed the spread and removed it. Buyer and seller are
+// derived from taker_side -- if the taker bought, the taker is the buyer.
+//
+// Fee RATES travel here, not amounts. Computing an amount means knowing which asset the
+// fee is charged in, which is symbol configuration the engine deliberately does not hold.
+// Settlement does that arithmetic.
+message TradeExecuted {
+  bytes trade_id = 1;
+
+  bytes taker_order_id = 2;
+  bytes maker_order_id = 3;
+  int64 taker_user_id = 4;
+  int64 maker_user_id = 5;
+
+  // Which way the taker went. SIDE_BUY means taker is buyer, maker is seller.
+  Side taker_side = 6;
+
+  // Scaled by 1e8. price is the MAKER's price -- the taker gets price improvement,
+  // because the maker was resting there first.
+  int64 price = 7;
+  int64 quantity = 8;
+  int64 quote_quantity = 9;
+
+  // Copied from each order, where they were stamped at acceptance.
+  int32 taker_fee_bps = 10;
+  int32 maker_fee_bps = 11;
+
+  // State after this fill, so a consumer can update its book without recomputing.
+  // taker_remaining_quantity is in the QUOTE asset, not base, when the taker was a
+  // quote-quantity market order (PlaceOrder.quote_order_qty) -- maker_remaining_quantity
+  // is always base, since a resting order can never be quote-denominated.
+  int64 taker_remaining_quantity = 12;
+  int64 maker_remaining_quantity = 13;
+  OrderStatus taker_status = 14;
+  OrderStatus maker_status = 15;
+
+  // The taker's own limit price at the moment of the fill; 0 for a market order. A buying
+  // taker locked this much per unit and paid `price`, so settlement releases the difference
+  // on every fill -- otherwise it stays locked on a FILLED order forever.
+  int64 taker_limit_price = 16;
+}
+
+// The order left the book without filling the remainder. Covers user cancels, IOC
+// remainders and GTD expiry -- one message rather than three, because a consumer
+// maintaining depth treats them identically and only reporting differs.
+message OrderCanceled {
+  bytes order_id = 1;
+  int64 user_id = 2;
+  CancelReason reason = 3;
+
+  // What the order will never fill; the already-filled portion stays filled. In the
+  // QUOTE asset, not base, when this was a quote-quantity market order that ran out of
+  // affordable book depth -- see TradeExecuted.taker_remaining_quantity.
+  int64 canceled_quantity = 4;
+
+  // Zero unless the order had partially filled before being cancelled.
+  int64 filled_quantity = 5;
+
+  optional int64 price = 6;
+  Side side = 7;
+  optional string client_order_id = 8;
+
+  // True when canceled_quantity was on the book at `price`, and a depth consumer must
+  // subtract it there. False when it never rested: an IOC remainder, a taker cut short by
+  // self-trade prevention, a parked order. Those carry a price too, so the price alone
+  // cannot tell the two apart.
+  bool rested = 9;
+}
+
+// The order now has new terms. If the new price crossed, the TradeExecuted events (and any
+// OrderCanceled from self-trade prevention) follow this one, under the same command_id.
+//
+// A depth consumer removes old_remaining_quantity at old_price and adds resting_quantity
+// at new_price. Skip both when pending_trigger is set: a parked order was never in the book.
+message OrderAmended {
+  bytes order_id = 1;
+  int64 user_id = 2;
+  Side side = 3;
+  optional string client_order_id = 4;
+
+  // Unset on a market-firing conditional order, which has no limit price.
+  optional int64 old_price = 5;
+  optional int64 new_price = 6;
+  optional int64 old_stop_price = 7;
+  optional int64 new_stop_price = 8;
+
+  // What was left before and after, in the order's own sizing unit (quote for a
+  // quote-sized order). new_quantity is the new total.
+  int64 old_remaining_quantity = 9;
+  int64 new_remaining_quantity = 10;
+  int64 new_quantity = 11;
+
+  // True only for a size reduction at the same price. Anything else re-queued the order.
+  bool priority_kept = 12;
+  bool pending_trigger = 13;
+
+  // Echoes AmendOrder.additional_locked.
+  int64 additional_locked = 14;
+
+  // What is on the book once the trades that follow are done -- OrderAccepted's field of
+  // the same name. Equal to new_remaining_quantity unless the new price crossed; zero for
+  // a parked order.
+  int64 resting_quantity = 15;
+}
+
+// The amend was refused and the order is exactly as it was. additional_locked must be
+// returned to the user.
+message OrderAmendRejected {
+  bytes order_id = 1;
+  int64 user_id = 2;
+  AmendRejectReason reason = 3;
+  optional string client_order_id = 4;
+  int64 additional_locked = 5;
+}
+
+// Not an Event: it has no symbol and no sequence, and it rides its own topic
+// (exchange.spot.engine-status.v1), one record per owned partition per second, only while
+// that partition's replay is finished and the consumer is polling. Receivers judge staleness
+// by their own clock on receipt; sent_at_us is for telling a slow broker from a dead engine.
+message EngineHeartbeat {
+  int32 partition = 1;
+  // Which process sent it, for the operator: two instances claiming one partition is a
+  // deployment mistake nothing else catches.
+  string instance = 2;
+  int64 sent_at_us = 3;
+}

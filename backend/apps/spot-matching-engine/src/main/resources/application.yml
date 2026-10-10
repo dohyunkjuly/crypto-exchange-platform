@@ -1,0 +1,167 @@
+# No spring.main.web-application-type: none, on purpose, even though the engine's actual
+# job still has no HTTP surface. Spring Boot's actuator only stands up a management
+# server -- same port or a separate one, does not matter -- when the main context is
+# itself a web application; set web-application-type: none and it refuses to create one
+# at all (verified via --debug's own condition-evaluation report: "Management Port non
+# web application context (OnManagementPortCondition)"), no matter what management.
+# server.port says. So this app IS a minimal servlet web app on the port below -- just
+# one with nothing registered on it except actuator's own health endpoint (management.
+# endpoints.web.exposure.include, further down). No controller, no other endpoint exists
+# to be reachable there.
+server:
+  port: ${ENGINE_MANAGEMENT_PORT:8090}
+
+spring:
+  application:
+    name: matching-engine
+
+  config:
+    # See open-api's application.yml. The engine has no database and no secrets today,
+    # but it reads the same .env so that KAFKA_BOOTSTRAP_SERVERS is set in exactly one
+    # place for all three apps rather than three.
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    admin:
+      # Without this, a NewTopic bean only creates a topic that does not exist yet -- it
+      # is silently powerless against one that already exists with the wrong config, which
+      # describes exactly the commands and snapshot-pointer topics on any broker that had
+      # auto-create on before these beans existed. WITH it, Spring diffs the declared
+      # config against the broker's and issues an incrementalAlterConfigs for whatever
+      # differs, on every startup. Idempotent once the two agree.
+      modify-topic-configs: true
+    consumer:
+      group-id: matching-engine
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      # Rebuild the book by replaying the entire command log when this group is new.
+      auto-offset-reset: earliest
+      # THE important one. We commit the offset ourselves, only after the resulting
+      # events are safely in Kafka. With auto-commit, a crash between matching an
+      # order and publishing its trades would lose the trade forever — the offset
+      # would say "done" for work whose output never left the process.
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual
+      # One thread. The book's correctness depends on processing a symbol's orders
+      # in log order; a second thread would reorder them.
+      concurrency: 1
+
+      # Together, these are what makes health.ConsumerLivenessHealthIndicator meaningful
+      # instead of a no-op: they configure the container's own detection of a consumer
+      # thread that has stopped calling poll() entirely, as opposed to one that is
+      # polling normally and simply has nothing to consume right now (a quiet partition
+      # is not a failure). Every monitor-interval, the container checks how long it has
+      # been since the last poll(); past no-poll-threshold * poll-timeout, it publishes
+      # a NonResponsiveConsumerEvent, repeated on every tick for as long as it stays
+      # true. The health indicator listens for that event -- see its own javadoc for why
+      # that gives it a self-healing signal for free, without a separate "recovered"
+      # event to also handle.
+      poll-timeout: 3000
+      no-poll-threshold: 3
+      monitor-interval: 10s
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      # A trade acknowledged by the leader alone can vanish if that leader dies
+      # before replicating it.
+      acks: all
+      properties:
+        # Retries can reorder and duplicate messages; idempotence makes the broker
+        # dedupe and preserve order, which the event sequence depends on.
+        enable.idempotence: true
+
+logging:
+  level:
+    com.exchange.spot.matching: INFO
+
+engine:
+  # Which command partitions THIS instance owns. Assigned statically rather than by the
+  # group coordinator, so a deploy never moves a book between processes. One instance
+  # today; eight instances later is eight values of this variable, same jar.
+  partitions: ${ENGINE_PARTITIONS:0,1,2,3,4,5,6,7}
+
+  # The TOTAL number of command partitions, which is not the same question as which ones
+  # this instance owns. It fixes how many partitions the snapshot-pointer topic gets, and
+  # those two must agree: recovery for command partition 3 reads pointer partition 3.
+  partition-count: ${ENGINE_PARTITION_COUNT:8}
+
+  # A partition snapshots after this many live commands OR after snapshot-max-interval-ms
+  # has passed, whichever comes first. Lower means faster recovery and more writes; higher
+  # means the opposite. Snapshot timing is the one thing here that does not have to be
+  # deterministic -- it is an optimisation, not part of the state machine.
+  #
+  # 30,000: a full sweep (docs/reference/performance.md, SnapshotOverheadBenchmark)
+  # measured overhead against a growing 500,000-order book at 1,000 / 10,000 / 30,000 /
+  # 50,000 / 100,000 -- 61.55% / 15.66% / 5.86% / 3.93% / 4.49%. The curve is still
+  # dropping sharply through 10,000; by 30,000 it has flattened, and 50,000/100,000 buy
+  # nothing further outside measurement noise. 30,000 sits right at the elbow: nearly all
+  # of the achievable throughput win, without paying for replay time the flat part of the
+  # curve does not return.
+  #
+  # That sweep used a worst-case workload -- every order rests, so the book only grows.
+  # Real traffic that cancels and replaces quotes stays shallower for the same command
+  # count, so true overhead in production is likely below what was measured here, not
+  # above it.
+  #
+  # Worst-case extra replay this trades away is still small in absolute terms: replay
+  # never publishes (see CommandConsumer), so it runs at the measured ~49,000
+  # commands/sec consume rate, not the ~4,000/sec live rate snapshot-every actually
+  # bounds. 29,999 commands costs roughly 0.6s to replay.
+  snapshot-every: 30000
+
+  # The count alone assumes steady traffic. Command retention is now unbounded, so a quiet
+  # partition that rarely reaches snapshot-every would otherwise have nothing bounding its
+  # worst-case replay -- it used to be the 7-day retention window; now it is this.
+  snapshot-max-interval-ms: 600000   # 10 minutes
+
+  # How many consecutive publish failures for one command CommandConsumer tolerates before
+  # giving up and exiting the process, rather than retrying forever. Retrying forever is
+  # correct for the data (see CommandConsumer.publishAll), but a stuck retry also means
+  # this single-threaded engine stops matching anything at all -- while still looking
+  # alive, since the process itself never crashes on its own. Exiting turns that invisible
+  # hang into a real process exit Kubernetes' restart policy already knows how to react to.
+  # 30 attempts, at the fixed 1s backoff, is ~30 seconds -- long enough to ride out a
+  # normal broker restart, short enough not to sit silently stuck for minutes.
+  publish-max-attempts: 30
+
+  # Where snapshot BYTES go. Only a pointer to them goes on Kafka: one snapshot holds a
+  # whole partition's book, and a Kafka record stops at 1 MB -- about 16k resting orders.
+  snapshot-storage:
+    bucket: ${SNAPSHOT_BUCKET:exchange-spot-snapshots}
+    region: ${SNAPSHOT_REGION:us-east-1}
+
+    # Points at the local MinIO, exactly as bootstrap-servers points at the local Kafka.
+    # A deployed engine sets this EMPTY, which is what makes the SDK talk to real S3.
+    endpoint: ${SNAPSHOT_S3_ENDPOINT:http://localhost:9000}
+
+    # Also empty in a deployed environment: blank credentials make the SDK use its default
+    # chain, which finds the instance role. These two exist so local development needs no
+    # AWS account, and they are MinIO's dev credentials from docker-compose, not secrets.
+    access-key: ${SNAPSHOT_S3_ACCESS_KEY:exchange}
+    secret-key: ${SNAPSHOT_S3_SECRET_KEY:exchange-secret}
+
+    # Refuse to start if the bucket cannot be reached, rather than running happily and
+    # saving nothing. The defaults above point at the local MinIO, so a deployment that
+    # forgets to override them would otherwise match orders perfectly while every snapshot
+    # failed against localhost -- discovered at the next restart, or worse, after retention
+    # had already trimmed the commands needed to rebuild without one.
+    #
+    # Startup only. A failure once the engine is running stays a warning, because that is
+    # usually transient and an exchange should not stop trading over an optimisation.
+    required: ${SNAPSHOT_REQUIRED:true}
+
+# No separate management.server.port -- server.port (top of this file) already IS the
+# health-only port; see the comment there for why a genuinely separate management
+# context is not an option here. One port, and the only thing on it is what's exposed
+# below.
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only health. Nothing today needs /metrics, /env, or anything else actuator can
+        # expose, and every endpoint added here is one more thing this process answers
+        # over the network -- not free, for an app whose whole design point is having as
+        # little of that as possible.
+        include: health

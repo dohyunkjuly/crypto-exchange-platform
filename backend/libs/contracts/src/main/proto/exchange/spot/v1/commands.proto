@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package exchange.spot.v1;
+
+import "exchange/spot/v1/common.proto";
+
+option java_package = "com.exchange.contracts.spot.v1";
+option java_multiple_files = true;
+
+// exchange.spot.commands.v1 -- the API's requests to the engine.
+//
+// A command is imperative and may be refused. An event is a fact and cannot. Everything
+// in this file is the former.
+//
+// THE ENGINE'S ONLY INPUT. Nothing else may influence its state -- not a database read,
+// not a clock, not a second topic. Replaying this log must reproduce the book exactly,
+// and it cannot if the engine consults anything that has changed in the meantime.
+//
+// That is why timestamp_us lives on the envelope: the API stamps it, the engine reads it,
+// and events derive their timestamps from it. An engine that called Instant.now() would
+// produce different output on every replay.
+
+message Command {
+  // ULID. Distinct from order_id -- one command produces one order, but a retried publish
+  // produces the same command twice. The engine remembers the last ids it processed per
+  // market and skips a repeat outright, emitting nothing: the first copy already produced
+  // the events. The producer's enable.idempotence stops most repeats before they are ever
+  // written; this is for the ones it cannot, such as a relay that re-sends after a crash.
+  // Carried onto every event the command produces, so an outcome can be traced to its
+  // request.
+  bytes command_id = 1;
+
+  // Also the record key. The partition itself is the market's configured one
+  // (spot_symbols.command_partition), so every command for a market lands in one partition,
+  // which is what makes "who was first" answerable at all.
+  string symbol = 2;
+
+  // Microseconds, assigned by the API. The engine's only source of time.
+  int64 timestamp_us = 3;
+
+  oneof payload {
+    PlaceOrder place_order = 10;
+    CancelOrder cancel_order = 11;
+    CancelAllOrders cancel_all_orders = 12;
+    AmendOrder amend_order = 13;
+  }
+}
+
+message PlaceOrder {
+  // Assigned by the API before publishing, so the 202 response can carry it and the
+  // engine can reference it while matching. A database-generated id would be available
+  // too late for both.
+  bytes order_id = 1;
+
+  int64 user_id = 2;
+
+  Side side = 3;
+  OrderType order_type = 4;
+  TimeInForce time_in_force = 5;
+
+  // Scaled by 1e8. Absent on a market order, which has no limit by definition -- hence
+  // optional, because proto3 cannot otherwise distinguish "no price" from "price zero".
+  optional int64 price = 6;
+  optional int64 stop_price = 7;
+
+  int64 quantity = 8;
+
+  // "Buy $100 of BTC" -- a market buy sized in the quote asset, because the base amount
+  // is not knowable until it fills.
+  optional int64 quote_order_qty = 9;
+
+  // Resolved once by the API from the user's tier, and carried here so the engine never
+  // reads the fee tables and a partially filled order cannot change rate halfway through.
+  int32 maker_fee_bps = 10;
+  int32 taker_fee_bps = 11;
+
+  // Unused.
+  optional int64 expires_at_us = 12;
+
+  // Client-supplied. Echoed back on every event so a client can correlate without
+  // having seen the 202 response.
+  optional string client_order_id = 13;
+
+  // Left UNSPECIFIED behaves as EXPIRE_MAKER. See SelfTradePreventionMode.
+  SelfTradePreventionMode self_trade_prevention_mode = 14;
+
+  // Conditional order types only. In basis points (100 = 1%): once triggered, the stop
+  // price trails the market by this much and fires on a reversal of that size from the
+  // best price seen, rather than firing at a single fixed price. When set, stop_price
+  // becomes optional -- present, it is an ACTIVATION price (tracking does not start
+  // until the market first reaches it); absent, tracking starts immediately from the
+  // current market price.
+  optional int32 trailing_delta_bps = 15;
+}
+
+message CancelOrder {
+  int64 user_id = 1;
+
+  // One of the two. client_order_id is resolved by the API to an order_id before
+  // publishing, so the engine only ever sees the former set -- the second is carried for
+  // echoing back on the event.
+  bytes order_id = 2;
+  optional string client_order_id = 3;
+}
+
+// Changes a resting or parked order in place. At least one new_* field is set; an unset one
+// keeps its value. The API has already checked ownership and the per-type field rules
+// (docs/reference/order-types.md); the engine decides what only the book can know.
+message AmendOrder {
+  int64 user_id = 1;
+  bytes order_id = 2;
+  optional string client_order_id = 3;
+
+  optional int64 new_price = 4;
+  optional int64 new_stop_price = 5;
+  // The new TOTAL size, filled part included, as the large venues define it. A fill racing
+  // the amend then cannot change what the user meant.
+  optional int64 new_quantity = 6;
+  // For a quote-sized order, instead of new_quantity.
+  optional int64 new_quote_order_qty = 7;
+
+  // What the API locked on top of the order's existing lock before publishing. Opaque to
+  // the engine, echoed on the outcome so settlement can reconcile or return it.
+  int64 additional_locked = 8;
+}
+
+// Which of a market's two books a cancel-all reaches.
+enum CancelScope {
+  CANCEL_SCOPE_UNSPECIFIED = 0;
+  // Resting on the order book only.
+  CANCEL_SCOPE_BOOK = 1;
+  // Parked waiting for a trigger only.
+  CANCEL_SCOPE_TRIGGERS = 2;
+}
+
+// Every open order for one user in this market that matches the filters. The symbol comes
+// from the envelope, so this cannot cancel across markets -- each market's cancel is its
+// own command, on its own partition, in its own order.
+//
+// The filters are what let this stay one command: the engine decides what matches when the
+// command reaches it, so an order placed after the API read its rows is still caught. Sent
+// as a cancel each, the API could only ever cancel what it had already seen.
+message CancelAllOrders {
+  int64 user_id = 1;
+
+  // AND-ed, and UNSPECIFIED means any -- so a cancel-all with no filters is byte for byte
+  // the message this was before these fields existed.
+  Side side = 2;
+
+  // The type the order was placed as: a conditional order is matched on its STOP_LOSS or
+  // TAKE_PROFIT type, not the LIMIT or MARKET it would have become once it fired.
+  OrderType order_type = 3;
+
+  CancelScope scope = 4;
+}

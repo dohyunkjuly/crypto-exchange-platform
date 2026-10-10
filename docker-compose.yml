@@ -1,0 +1,547 @@
+# Local infrastructure, plus the apps themselves under the "full" profile.
+#
+#   docker compose up -d                    infra only -- run the apps on your host
+#                                            for fast rebuilds and a debugger (default)
+#   docker compose --profile full up -d     the whole stack, containers only, behind nginx:
+#                                            http://app.localhost, api., docs., admin.
+#   docker compose -f docker-compose.yml -f docker-compose.perf.yml --profile full up -d
+#                                            the same on three Kafka brokers, for the benchmarks
+#
+services:
+  # Kafka in KRaft mode -- no ZooKeeper. A single broker that is both controller
+  # and broker, which is all you want locally. docker-compose.perf.yml turns this into
+  # three brokers with every topic replicated, the shape a deployment runs.
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: exchange-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      # Two data listeners advertising two different addresses, because "the broker" means
+      # something different depending on who's asking. A host process (your IDE, the perf
+      # benchmarks, `docker exec ... kafka-configs.sh`) reaches this container through the
+      # published port, so it needs PLAINTEXT advertised as localhost:9092. An app running
+      # IN a container (the "full" profile below) reaches it over the compose network by
+      # service name, so it needs INTERNAL advertised as kafka:29092 instead -- if it only
+      # had the host listener, it would connect fine for the initial metadata fetch, then
+      # get told the broker lives at "localhost:9092" and try to reach itself.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # One broker means one replica is all that is possible. In production these
+      # are 3, and the acks=all setting in the producers only means something once
+      # they are.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Topics appear on first use. Convenient locally; in production you create
+      # them explicitly, because the partition count is a capacity decision and
+      # you cannot lower it later.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # On the volume below, not the image's default under /tmp. The command log is what the
+      # engine rebuilds its book from, and MySQL keeps its rows across a `down`: a log that
+      # did not would bring the engine back with empty books while MySQL still called every
+      # order open -- orders that can never fill or cancel, with their funds locked.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # The command topic, shaped as the engine declares it (CommandTopicConfig: 8 partitions,
+  # kept forever), made before anything can produce to it. Without the engine running -- CI,
+  # or a stack brought up for the *IT tests -- the first producer would auto-create it with
+  # one partition, and every app that checks the markets' partitions against the topic at
+  # start-up would refuse to start. Idempotent: a topic that exists is left as it is.
+  kafka-topics:
+    image: apache/kafka:3.9.0
+    container_name: exchange-kafka-topics
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/opt/kafka/bin/kafka-topics.sh"]
+    command: ["--bootstrap-server", "kafka:29092", "--create", "--if-not-exists",
+              "--topic", "exchange.spot.commands.v1", "--partitions", "8",
+              "--replication-factor", "${KAFKA_REPLICATION_FACTOR:-1}",
+              "--config", "retention.ms=-1"]
+
+  # Holds the things that must survive a restart, and that Kafka's retention window is
+  # the wrong home for: users, balances, the trade archive.
+  #
+  # ONE database (`exchange`). Splitting user and spot into two databases on this
+  # same server would buy exactly zero scaling -- same process, same disk, same buffer
+  # pool -- while costing an extra service to own the second one. Real scaling here comes
+  # from keeping the hot path OUT of the DB (Kafka absorbs the writes, the engine matches
+  # in RAM), then read replicas, then batched writes, then sharding by account_id.
+  #
+  # What keeps a future split cheap is package discipline, not infrastructure: no joins
+  # and no JPA relationships across the user / wallet / spot domains. See
+  # libs/persistence.
+  mysql:
+    image: mysql:8.4
+    container_name: exchange-mysql
+    ports:
+      # 3308 on the host. NOT 3306 (your local MySQL) and NOT 3307 (another project's
+      # container). This one must shadow neither. Inside Docker it is still 3306.
+      - "3308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: exchange
+      MYSQL_USER: exchange
+      MYSQL_PASSWORD: exchange
+    command:
+      # Store timestamps in UTC. A server-local time zone is how you end up with two
+      # trades that appear to have happened in the wrong order, twice a year.
+      - --default-time-zone=+00:00
+      # (No --default-authentication-plugin here: MySQL 8.4 removed that option, and
+      # caching_sha2_password is its default anyway. Passing it makes the server abort on
+      # startup with "unknown variable".)
+      #
+      # utf8mb4 is the MySQL 8 default. Do not "fix" it to utf8 -- MySQL's "utf8" is a
+      # 3-byte impostor that cannot store emoji or much CJK text, so a user's name would
+      # silently fail to save.
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Stands in for S3, speaking the same API. The engine's snapshots outgrew a Kafka
+  # message -- one snapshot carries an entire partition's book, and Kafka caps a record
+  # at 1 MB, which is about 16k resting orders -- so the bytes go to object storage and
+  # only a pointer to them goes on the topic.
+  #
+  # MinIO rather than a real bucket so that the local path is the SAME code path as
+  # production: same SDK, same calls, one endpoint override. A filesystem stub for dev
+  # would mean the thing you test is not the thing that runs.
+  minio:
+    # Chainguard's build: MinIO stopped publishing its own images, first on Docker Hub and
+    # then on quay.io, and a pull of either is refused. A machine that pulled before still
+    # has it cached, which is why this only ever breaks on a fresh runner. `latest` because
+    # no dated tag is published without an account; the engine uses put, get, list and
+    # delete, which do not move between releases.
+    image: cgr.dev/chainguard/minio:latest
+    container_name: exchange-minio
+    # The image runs as an unprivileged user, and a volume an earlier image wrote is root's:
+    # it would refuse to start on any machine that has run this stack before.
+    user: "0:0"
+    command: server /data --console-address ":9001"
+    ports:
+      # 9000 is the S3 API, 9001 the web console (http://localhost:9001).
+      # NOT 9092 -- that is Kafka, and these two are easy to transpose.
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: exchange
+      MINIO_ROOT_PASSWORD: exchange-secret
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Also unused yet. Its eventual job is hot read state: the top-of-book snapshot
+  # api-public serves on every page load, and session/rate-limit counters.
+  redis:
+    image: redis:7-alpine
+    container_name: exchange-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # A local SMTP server with a web inbox, so verification emails can actually be read and
+  # their links clicked without a provider account or a network. http://localhost:8025
+  #
+  # It is what makes SMTP the right transport choice: web-bff runs the same SmtpMailer
+  # here as it would against SendGrid, so the path exercised locally is the path that runs
+  # in production. An HTTP-API client could not be stood in for this way.
+  #
+  # Mailpit rather than MailHog -- MailHog is archived.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: exchange-mailpit
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # web inbox
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Candles, and only candles. The `exchange` MySQL database stays the system of record
+  # for anything that is money or an order; this holds a derived read model that can be
+  # thrown away and rebuilt by replaying exchange.spot.events.v1 from the start.
+  #
+  # A separate store rather than another MySQL table on purpose: it is written by one
+  # app (market-data) at a completely different rate and shape than the order/balance
+  # tables, and nothing in it participates in a settlement transaction.
+  mongo:
+    image: mongo:7
+    container_name: exchange-mongo
+    ports:
+      # 27018 on the host, not 27017 -- same reasoning as MySQL's 3308: it must not
+      # shadow a local MongoDB or another project's container. Inside Docker it is
+      # still 27017.
+      - "27018:27017"
+    environment:
+      MONGO_INITDB_DATABASE: marketdata
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- The apps -- "full" profile only, so a plain `docker compose up -d` keeps -------
+  # ---- doing exactly what the comment at the top says: infra only.               -------
+  #
+  # Every one of these reaches the services above by service name over the compose
+  # network (kafka:29092, mysql:3306, minio:9000) -- NOT the host-published ports
+  # (9092, 3308, 9000-from-host), which only work from outside Docker.
+
+  spot-matching-engine:
+    build:
+      context: backend
+      dockerfile: apps/spot-matching-engine/Dockerfile
+    container_name: exchange-spot-matching-engine
+    profiles: ["full"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SNAPSHOT_S3_ENDPOINT: http://minio:9000
+      SNAPSHOT_S3_ACCESS_KEY: exchange
+      SNAPSHOT_S3_SECRET_KEY: exchange-secret
+    ports:
+      # Actuator's management port only -- a liveness probe's side door, not the app's
+      # actual interface (still Kafka-only). See MatchingEngineApplication's javadoc.
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  spot-settlement:
+    build:
+      context: backend
+      dockerfile: apps/spot-settlement/Dockerfile
+    container_name: exchange-spot-settlement
+    profiles: ["full"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # libs/core's RateLimiter is a @Component, so every app scanning com.exchange.core needs a
+      # Redis connection whether or not it rate-limits anything. Without this it dials localhost
+      # inside its own container and actuator reports DOWN.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: jdbc:mysql://mysql:3306/exchange?serverTimezone=UTC
+      FLYWAY_LOCATIONS: classpath:db/migration,classpath:db/seed
+      DATABASE_USER: exchange
+      DATABASE_PASSWORD: exchange
+    ports:
+      # Actuator's health port only -- a liveness probe's side door, not this app's
+      # actual interface (still Kafka-in, DB-out). See SettlementApplication's javadoc.
+      - "8091:8091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+
+  # Copy trading (docs/reference/copy-trading.md): reads exchange.spot.events.v1 under its own
+  # group and places each follower's copy through the same order path web-bff uses. It writes
+  # no order and no balance itself, so settlement stays the only writer of both.
+  spot-copy:
+    build:
+      context: backend
+      dockerfile: apps/spot-copy/Dockerfile
+    container_name: exchange-spot-copy
+    profiles: ["full"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # libs/core's RateLimiter needs a Redis connection in every app that scans it; see
+      # spot-settlement above.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: jdbc:mysql://mysql:3306/exchange?serverTimezone=UTC
+      FLYWAY_LOCATIONS: classpath:db/migration,classpath:db/seed
+      DATABASE_USER: exchange
+      DATABASE_PASSWORD: exchange
+    ports:
+      # Actuator's health port only: this app has no API.
+      - "8093:8093"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8093/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+
+  # The second consumer of exchange.spot.events.v1, under its own group. Note what it
+  # does NOT depend on: MySQL. It reads the same events spot-settlement does and writes
+  # candles to Mongo instead, so a database outage cannot stop charts, and a Mongo outage
+  # cannot stop balances from settling. That separation is the whole reason it is its own
+  # service rather than more code inside settlement.
+  market-data:
+    build:
+      context: backend
+      dockerfile: apps/market-data/Dockerfile
+    container_name: exchange-market-data
+    profiles: ["full"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # libs/core's RateLimiter is a @Component, so every app scanning com.exchange.core needs a
+      # Redis connection whether or not it rate-limits anything. Without this it dials localhost
+      # inside its own container and actuator reports DOWN.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MONGODB_URI: mongodb://mongo:27017/marketdata
+    ports:
+      # Actuator's health port only -- a liveness probe's side door, not this app's
+      # actual interface (Kafka in, Mongo out). See MarketDataApplication's javadoc.
+      - "8092:8092"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8092/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  spot-open-api:
+    build:
+      context: backend
+      dockerfile: apps/spot-open-api/Dockerfile
+    container_name: exchange-spot-open-api
+    profiles: ["full"]
+    # Loopback only: the public door is nginx at api.localhost. The bots and the ITs dial this.
+    ports:
+      - "127.0.0.1:8080:8080"
+    # API_KEY_ENCRYPTION_KEY and MFA_ENCRYPTION_KEY, same file and same reasoning as web-bff's
+    # below: the signing gate decrypts key secrets, and the user module it scans needs both.
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # libs/core's RateLimiter is a @Component, so every app scanning com.exchange.core needs a
+      # Redis connection whether or not it rate-limits anything. Without this it dials localhost
+      # inside its own container and actuator reports DOWN.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: jdbc:mysql://mysql:3306/exchange?serverTimezone=UTC
+      FLYWAY_LOCATIONS: classpath:db/migration,classpath:db/seed
+      DATABASE_USER: exchange
+      DATABASE_PASSWORD: exchange
+      MONGODB_URI: mongodb://mongo:27017/marketdata
+      # Lifted for bots/ (docs/reference/...): a hundred bots behind one container IP share
+      # the weight budget, and one bot exhausts the shipped 1000 orders a day in 100 seconds.
+      # These are echoed by GET /v1/markets/info, so the local API advertises what it enforces.
+      RATE_LIMIT_WEIGHT_PER_MINUTE: 6000000
+      RATE_LIMIT_ORDERS_PER_10S: 100000
+      RATE_LIMIT_ORDERS_PER_DAY: 100000000
+      RATE_LIMIT_WS_CONNECTIONS_PER_IP: 1000
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  web-bff:
+    build:
+      context: backend
+      dockerfile: apps/web-bff/Dockerfile
+    container_name: exchange-web-bff
+    profiles: ["full"]
+    # Loopback only: the browser reaches this through nginx at app.localhost/bff.
+    ports:
+      - "127.0.0.1:8081:8081"
+    # Where API_KEY_ENCRYPTION_KEY and MFA_ENCRYPTION_KEY come from. Both are read with no
+    # default, so this app refuses to start without them -- deliberately. Optional so a missing
+    # file is that clear startup failure rather than a compose error about a path.
+    # `environment:` below wins over anything here, which is what lets that file keep the
+    # host-facing values (localhost:3308, localhost:27018) while the container uses service names.
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      # This file is the LOCAL stack. `dev` enables the faucet and the seeded accounts, which
+      # hand out funds and verified status with no checks, so a real deployment must never set
+      # it. KYC submitted on the web waits for a reviewer on the admin app, as in life.
+      SPRING_PROFILES_ACTIVE: dev
+      # The page's origin behind nginx, which the socket handshake checks. REST needs no CORS
+      # there: page and /bff/ share the host.
+      EXCHANGE_CORS_ALLOWED_ORIGIN: http://app.localhost
+      # Requests a minute from one address before 429: an abuse guard, not a capacity figure.
+      # The performance harness runs everything from one address, so `./gradlew perf` is run
+      # with PERF_BFF_RATE_LIMIT=100000 in the environment (docs/reference/performance.md).
+      EXCHANGE_RATE_LIMIT_MAX_REQUESTS: ${PERF_BFF_RATE_LIMIT:-100}
+      # From backend/.env, through the .env link at the root (CONTRIBUTING.md): compose only
+      # interpolates ${...} from the project root, and the name must be one value everywhere.
+      # Empty passes through on purpose -- the apps and the image builds are what refuse a
+      # blank name, each with its own message, and `docker compose up -d` for the
+      # infrastructure alone must not need it.
+      EXCHANGE_NAME: "${EXCHANGE_NAME:-}"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MONGODB_URI: mongodb://mongo:27017/marketdata
+      DATABASE_URL: jdbc:mysql://mysql:3306/exchange?serverTimezone=UTC
+      FLYWAY_LOCATIONS: classpath:db/migration,classpath:db/seed
+      DATABASE_USER: exchange
+      DATABASE_PASSWORD: exchange
+      # Real SMTP against Mailpit, not the logging fallback: the point of running the full
+      # stack is that it behaves like production, and this is the same code path.
+      MAIL_MODE: smtp
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      MAIL_FROM: no-reply@exchange.local
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  # Staff only. Its own process, port and cookie: docs/reference/admin.md. On a real
+  # deployment this sits on an internal network behind an IP allowlist, never the public
+  # domain. Nothing seeds an admin; make the first one with the CLI in that page.
+  admin-bff:
+    build:
+      context: backend
+      dockerfile: apps/admin-bff/Dockerfile
+    container_name: exchange-admin-bff
+    profiles: ["full"]
+    # Loopback only: staff reach this through nginx at admin.localhost/admin, behind its allowlist.
+    ports:
+      - "127.0.0.1:8083:8083"
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      DATABASE_URL: jdbc:mysql://mysql:3306/exchange?serverTimezone=UTC
+      DATABASE_USER: exchange
+      DATABASE_PASSWORD: exchange
+      ADMIN_WEB_ORIGIN: http://admin.localhost
+      EXCHANGE_NAME: "${EXCHANGE_NAME:-}"
+      # The engine's engine.partition-count, which it runs at 8 here.
+      ENGINE_PARTITION_COUNT: 8
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: admin
+      args:
+        # "/" is same-origin: nginx serves the page and /admin/ from one host.
+        NEXT_PUBLIC_ADMIN_BFF_URL: /
+        NEXT_PUBLIC_EXCHANGE_NAME: "${EXCHANGE_NAME:-}"
+    container_name: exchange-admin
+    profiles: ["full"]
+    depends_on:
+      - admin-bff
+
+  web:
+    build:
+      context: web
+      args:
+        # Baked in at build time, not read at runtime -- see web/Dockerfile. "/" is
+        # same-origin: nginx serves the page and /bff/ from one host, so the browser needs no
+        # address at all. Rebuild the image to change this.
+        NEXT_PUBLIC_BFF_URL: /
+        NEXT_PUBLIC_EXCHANGE_NAME: "${EXCHANGE_NAME:-}"
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+    container_name: exchange-web
+    profiles: ["full"]
+    depends_on:
+      - web-bff
+
+  # The API's documentation site, built from api-docs/content and served as files.
+  api-docs:
+    build:
+      context: api-docs
+      args:
+        EXCHANGE_NAME: "${EXCHANGE_NAME:-}"
+    container_name: exchange-api-docs
+    profiles: ["full"]
+
+  # The only container with public ports, and the way in: deploy/nginx. Four hostnames on one
+  # listener; *.localhost resolves in every browser with no /etc/hosts entry. EXCHANGE_DOMAIN
+  # adds the production names beside them, so the same file ships.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: exchange-nginx
+    profiles: ["full"]
+    ports:
+      - "80:80"
+    environment:
+      EXCHANGE_DOMAIN: ${EXCHANGE_DOMAIN:-exchange.example}
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      # Who may open the staff console. The default is the strict file (private ranges); a
+      # laptop whose traffic reaches Docker from a public address sets the .local one.
+      - ${ADMIN_ALLOWLIST:-./deploy/nginx/admin-allowlist.conf}:/etc/nginx/admin-allowlist.conf:ro
+    depends_on:
+      - web
+      - web-bff
+      - admin
+      - admin-bff
+      - spot-open-api
+      - api-docs
+
+volumes:
+  kafka-data:
+  mysql-data:
+  minio-data:
+  mongo-data:

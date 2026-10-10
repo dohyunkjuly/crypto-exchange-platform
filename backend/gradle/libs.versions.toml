@@ -1,0 +1,77 @@
+# Version catalog: every Java dependency version in the repo is declared once,
+# here. Modules refer to them as libs.spring.boot.starter.web. This is how you
+# stop two apps in the same build drifting onto different Kafka clients.
+
+[versions]
+springBoot = "3.5.4"
+springDependencyManagement = "1.1.7"
+protobuf = "4.29.3"
+protobufPlugin = "0.9.5"
+springdoc = "2.8.6"
+awsSdk = "2.31.7"
+junit = "5.11.4"
+
+[libraries]
+protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
+
+# Versions omitted: the Spring dependency-management plugin pins them from the
+# Spring Boot BOM, so they can never disagree with the Boot version above.
+spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter" }
+spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
+spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+# NimbusJwtDecoder, to verify the ID token "Sign in with Google" hands the browser.
+# Version-managed by the Spring Boot BOM, unlike google-api-client, and it keeps the
+# security-critical claim checks visible in our own code rather than inside an SDK.
+spring-security-oauth2-jose = { module = "org.springframework.security:spring-security-oauth2-jose" }
+# JavaMailSender, for SmtpMailer. SMTP rather than a provider SDK so the same code runs
+# against Mailpit locally and SendGrid/SES/Postmark in production -- see LoggingMailer.
+spring-boot-starter-mail = { module = "org.springframework.boot:spring-boot-starter-mail" }
+# Raw WebSocket (no STOMP). web-bff pushes a live market feed to the trading page; see
+# its market/feed package for why the protocol is deliberately not shaped like the large venues' feeds.
+spring-boot-starter-websocket = { module = "org.springframework.boot:spring-boot-starter-websocket" }
+spring-kafka = { module = "org.springframework.kafka:spring-kafka" }
+# Lettuce client + StringRedisTemplate, auto-configured from spring.data.redis.*. Used by
+# RateLimiter -- docker-compose.yml already runs Redis, previously unreferenced by any app.
+spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
+
+# Object storage for engine snapshots. NOT managed by the Spring Boot BOM, so this one
+# carries its own version -- the BOM pins nothing from AWS.
+aws-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awsSdk" }
+
+# Persistence. Versions come from the Spring Boot BOM, so they are guaranteed to be
+# the ones this Boot version was tested against.
+spring-boot-starter-data-jpa = { module = "org.springframework.boot:spring-boot-starter-data-jpa" }
+flyway-core = { module = "org.flywaydb:flyway-core" }
+# Flyway 10+ split database support into per-vendor modules. Without this one, Flyway
+# does not know how to talk to MySQL at all and the app fails at startup.
+flyway-mysql = { module = "org.flywaydb:flyway-mysql" }
+# mysql-connector-j is the current driver. The old `mysql:mysql-connector-java`
+# coordinates are deprecated -- do not use them.
+mysql-connector = { module = "com.mysql:mysql-connector-j" }
+# Candles only -- see libs/domain/marketdata's build file for why that read model lives
+# in its own store instead of another table in the `exchange` database.
+spring-boot-starter-data-mongodb = { module = "org.springframework.boot:spring-boot-starter-data-mongodb" }
+
+# Generates getters/setters/constructors at compile time. compileOnly + annotationProcessor
+# in the modules that use it -- it must never end up on the runtime classpath.
+lombok = { module = "org.projectlombok:lombok" }
+
+# Just the crypto artifact (BCryptPasswordEncoder) -- for a service that needs to hash a
+# password without pulling in the full filter-chain/CSRF machinery of the security starter.
+spring-security-crypto = { module = "org.springframework.security:spring-security-crypto" }
+
+# Serves an interactive OpenAPI/Swagger page at /swagger-ui.html and the raw
+# spec at /v3/api-docs, generated from the controllers.
+springdoc-openapi = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }
+
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "springDependencyManagement" }
+protobuf = { id = "com.google.protobuf", version.ref = "protobufPlugin" }

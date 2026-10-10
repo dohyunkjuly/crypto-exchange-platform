@@ -1,0 +1,58 @@
+# Runs only when the backend or the infrastructure it is tested against changes. Split out
+# of one CI workflow because a docs-only commit used to pay for this whole job: 43% of the
+# commits in one billing cycle changed nothing but markdown.
+#
+# The path list is repeated under both events because GitHub's workflow parser does not
+# support YAML anchors. Keep the two in step.
+name: Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      # "!" negates, and a later pattern wins: the per-app READMEs live under backend/
+      # and compile nothing.
+      - "!backend/**.md"
+      - docker-compose.yml
+      - .github/workflows/ci-backend.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - backend/**
+      - "!backend/**.md"
+      - docker-compose.yml
+      - .github/workflows/ci-backend.yml
+
+# Only the newest commit for a ref is worth verifying; an older run is cancelled rather
+# than finished and paid for.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Kafka, MySQL, MinIO and Mongo -- the real things the *IT tests talk to, not mocks.
+      # Testing against live infrastructure is this project's rule (docs/STYLE.md), and CI
+      # is the last place that should be the exception. No "full" profile: the apps under
+      # test run from JUnit, not as containers.
+      - name: Start infrastructure
+        run: docker compose up -d --wait
+
+      # excludeTags("performance") is already this task's default (build.gradle.kts):
+      # the benchmarks live in backend/perf and run with `./gradlew perf`, and some of
+      # them build multi-million-order books.
+      - name: Build and test
+        working-directory: backend
+        run: ./gradlew build

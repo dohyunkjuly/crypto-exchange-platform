@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package exchange.spot.v1;
+
+import "exchange/spot/v1/common.proto";
+
+option java_package = "com.exchange.contracts.spot.v1";
+option java_multiple_files = true;
+
+// exchange.spot.depth.v1 -- one price level's new size, for the full-ladder socket feed.
+//
+// Published by market-data after it folds an event into a market's book, which is the one
+// place that knows what a level holds AFTER the change. The engine's events carry deltas
+// (what rested, what filled, what was withdrawn); a client applying deltas that misses one
+// drifts silently, and a bug on either side is never corrected. An absolute quantity
+// self-heals: the next change to the level states it in full. The large venues send levels
+// the same way for the same reason.
+//
+// MAY LOSE MESSAGES, like settlements.v1 and unlike events.v1: everything here is
+// recoverable from the stored book over REST, and the client procedure (design doc, "Depth")
+// resyncs on any gap in `sequence`. Retention is short and consumers start at `latest`.
+//
+// Keyed by symbol so one market's changes share a partition and arrive in sequence order.
+message DepthLevelChanged {
+  string symbol = 1;
+  // The engine's per-market event sequence that caused this change: what the REST snapshot's
+  // lastSequence and the client's gap check are measured against.
+  int64 sequence = 2;
+  Side side = 3;
+  // 1e8-scaled. Quantity 0 means the level is gone.
+  int64 price = 4;
+  int64 quantity = 5;
+}

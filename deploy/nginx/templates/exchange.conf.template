@@ -1,0 +1,102 @@
+# The one process with public ports. Everything behind it is reached by compose service name
+# and publishes nothing (or loopback only, for the bots and the tests).
+#
+# Four hosts, one file, so the laptop runs the file production ships. It is a template: the
+# nginx image substitutes ${EXCHANGE_DOMAIN} at start-up and drops the result in conf.d/.
+# Hostnames are *.localhost locally -- browsers resolve them without /etc/hosts and treat
+# them as a secure context, which is what lets the Secure cookies work over plain http --
+# and real names in production, where the TLS block in docs/reference/deployment.md goes in
+# front of these. Why hosts and not paths: the API gets an origin no customer cookie is ever
+# sent to, the staff host can be DNS'd to an internal address, and nothing behind here has
+# to learn a path prefix.
+
+server_tokens off;
+gzip          on;
+gzip_types    text/plain text/css application/json application/javascript text/javascript image/svg+xml;
+
+# Nothing here takes a big body: a KYC form, an order, a settings row.
+client_max_body_size 1m;
+
+# What every backend needs to know about the client it never sees directly. The apps run
+# Tomcat's RemoteIp valve (server.forward-headers-strategy: native), so getRemoteAddr()
+# is the first of these, not this container's address -- rate limits, key IP allowlists
+# and audit rows all depend on that.
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+proxy_http_version 1.1;
+proxy_set_header   Host              $host;
+proxy_set_header   X-Real-IP         $remote_addr;
+proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+proxy_set_header   X-Forwarded-Proto $scheme;
+proxy_set_header   X-Forwarded-Host  $host;
+proxy_set_header   Upgrade           $http_upgrade;
+proxy_set_header   Connection        $connection_upgrade;
+# Longer than the apps' own idle timeouts, so a quiet socket is closed by the app, with a
+# close frame, not by nginx mid-stream.
+proxy_read_timeout 90s;
+proxy_send_timeout 90s;
+
+add_header X-Content-Type-Options nosniff always;
+add_header X-Frame-Options DENY always;
+add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+# Service names are looked up per request through Docker's resolver, not once at start-up:
+# a container that is rebuilt gets a new address, and a static upstream would keep 502-ing at
+# the old one until nginx restarted. The variables below are what makes nginx resolve late.
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+# Anything that is not one of the four names below gets nothing, including a bare IP.
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+
+# The exchange. Page and BFF on one origin: no CORS, no build-time BFF URL, cookies that
+# need no SameSite=None.
+server {
+    listen 80;
+    server_name app.localhost app.${EXCHANGE_DOMAIN};
+
+    set $web_bff http://web-bff:8081;
+    set $web     http://web:3000;
+    location /bff/ { proxy_pass $web_bff; }
+    location /     { proxy_pass $web; }
+}
+
+# The public API. Its own origin, so no browser cookie is ever attached to a request here.
+server {
+    listen 80;
+    server_name api.localhost api.${EXCHANGE_DOMAIN};
+
+    set $open_api http://spot-open-api:8080;
+    location / { proxy_pass $open_api; }
+}
+
+# The API's documentation: a static site.
+server {
+    listen 80;
+    server_name docs.localhost docs.${EXCHANGE_DOMAIN};
+
+    set $docs http://api-docs:80;
+    location / { proxy_pass $docs; }
+}
+
+# Staff. The allowlist is the "internal network behind an IP allowlist" the staff console's
+# design assumes (docs/reference/admin.md); edit admin-allowlist.conf, never this block.
+server {
+    listen 80;
+    server_name admin.localhost admin.${EXCHANGE_DOMAIN};
+
+    include /etc/nginx/admin-allowlist.conf;
+    # A refusal that says why and what to do, instead of a bare 403 on a first run.
+    error_page 403 = @denied;
+    location @denied {
+        default_type text/plain;
+        return 403 "Staff console: your address $remote_addr is not on the allowlist (deploy/nginx/admin-allowlist.conf).\nOn a laptop, set ADMIN_ALLOWLIST=./deploy/nginx/admin-allowlist.local.conf in backend/.env and restart nginx.\n";
+    }
+
+    set $admin_bff http://admin-bff:8083;
+    set $admin     http://admin:3001;
+    location /admin/ { proxy_pass $admin_bff; }
+    location /       { proxy_pass $admin; }
+}

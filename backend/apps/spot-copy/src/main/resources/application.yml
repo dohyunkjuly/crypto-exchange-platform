@@ -1,0 +1,86 @@
+# The port is the health probe's and nothing else's, as in spot-settlement: actuator only stands
+# a server up inside a web application, so this is one, with no controller on it.
+server:
+  port: ${COPY_MANAGEMENT_PORT:8093}
+
+spring:
+  application:
+    name: spot-copy
+
+  task:
+    scheduling:
+      pool:
+        # One thread is Spring Boot's default for every @Scheduled method in the app. The
+        # nightly figures can take a while, and on one thread closing copy accounts would
+        # wait behind them; on two, it does not.
+        size: 2
+
+  config:
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
+
+  data:
+    redis:
+      # libs/core's RateLimiter is a @Component, so scanning com.exchange.core needs this even
+      # though nothing here is rate-limited. See spot-settlement's application.yml.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3308/exchange?serverTimezone=UTC}
+    username: ${DATABASE_USER:exchange}
+    password: ${DATABASE_PASSWORD:exchange}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      # A copy is a command like any other: web-bff's settings, for web-bff's reasons.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      # Its own group: every event reaches the copier whatever else is reading the topic.
+      group-id: spot-copy
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      # From the start on first run: a lead order that closed while the copier was not yet
+      # deployed is still copied. After that the group's own offset is where it resumes.
+      auto-offset-reset: earliest
+      # Committed by hand, only once a batch has been handled. See kafka.EventConsumer.
+      enable-auto-commit: false
+    listener:
+      type: batch
+      ack-mode: manual
+      # The health indicator's signal that the listener thread has stopped polling.
+      poll-timeout: 3000
+      no-poll-threshold: 3
+      monitor-interval: 10s
+
+exchange:
+  copy:
+    # What a copy account is funded in, and so the only quote a lead account may trade
+    # (docs/reference/copy-trading.md).
+    quote-asset: USDT
+    # How often a closing copy account is looked at again: it is emptied only once settlement
+    # has applied its last sale, which is settlement's clock, not this app's.
+    close-sweep-ms: 2000
+    # A leader's figures, once a night, soon after the UTC day they describe has ended.
+    stats-cron: "0 30 0 * * *"
+    # The weekly profit share, once the week has ended: Monday, just after midnight UTC.
+    share-cron: "0 5 0 * * MON"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

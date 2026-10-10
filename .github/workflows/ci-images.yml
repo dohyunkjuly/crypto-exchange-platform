@@ -1,0 +1,42 @@
+# The images are only worth rebuilding when something that shapes them changes.
+# `./gradlew build` already runs bootJar, so a Java change cannot break the jar these
+# copy; what a Dockerfile edit breaks is a COPY path, a base image tag or an entrypoint.
+# Each backend image is a cold Gradle build inside the container, which made this by far
+# the most expensive part of running CI on every commit.
+#
+# The path list is repeated under both events: GitHub's parser has no YAML anchors.
+name: Docker images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Dockerfile"
+      - docker-compose.yml
+      - .github/workflows/ci-images.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/Dockerfile"
+      - docker-compose.yml
+      - .github/workflows/ci-images.yml
+  # For when a base image or a dependency moved under us and nothing here changed.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every service in the full profile -- the five backend apps and web -- which is what
+      # CONTRIBUTING's `docker compose --profile full up -d --build` asks a newcomer to run.
+      # The one value a build needs is the operator's name, which has no default anywhere.
+      - name: Build images
+        run: docker compose --profile full build
+        env:
+          EXCHANGE_NAME: Example Exchange

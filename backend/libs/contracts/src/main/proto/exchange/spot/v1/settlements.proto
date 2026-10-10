@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package exchange.spot.v1;
+
+import "exchange/spot/v1/common.proto";
+
+option java_package = "com.exchange.contracts.spot.v1";
+option java_multiple_files = true;
+
+// exchange.spot.settlements.v1 -- what happened to ONE USER, for pushing at their screen.
+//
+// Everything here is already recorded somewhere else. spot_trades holds the fills,
+// wallet_balances holds the balances, and /bff/trades and /bff/wallet/balances serve both.
+// This topic exists so a client does not have to poll them.
+//
+// THIS IS THE ONE TOPIC HERE THAT MAY LOSE MESSAGES. A lost command is a lost order and a
+// lost event is a projection that can never be rebuilt, so both of those are retained
+// forever and published inside the paths that must not fail. A lost message here means a
+// panel is stale until it refetches. So it is published after commit, off the request
+// thread, and a failure is logged and dropped -- never retried into the path that moved the
+// money, and never allowed to roll one back.
+//
+// Retention is therefore finite and short: nobody replays this. Consumers take a group per
+// process and start at `latest`, because a reconnecting browser refetches over REST and has
+// no use for what happened while it was away.
+//
+// ONE TOPIC, NOT ONE PER TYPE, for the same reason events.proto gives: ordering has to hold
+// ACROSS types. A fill and the balance change it caused must arrive in that order, or a
+// client renders a balance with nothing to explain it. Keyed by user_id so one user's
+// messages share a partition.
+//
+// WHO PUBLISHES. Whoever made the change, which is not one place:
+//   * BalanceChanged comes from BalanceService itself, so every writer is captured --
+//     settlement settling a fill, web-bff or spot-open-api locking funds at order
+//     placement, and whatever credits a deposit later.
+//   * FillSettled comes from spot-settlement alone, because it alone writes a trade, and
+//     because the fee AMOUNT only exists once it has done the arithmetic the engine
+//     deliberately does not do (see TradeExecuted).
+//
+// NOT COVERED. A deposit or withdrawal credited by the operator's own custody system
+// bypasses all of these -- this is a white-label product and that decision lives outside
+// this codebase (see backend/AGENTS.md). Those balances change without a message here, by
+// design, not by omission.
+
+message Settlement {
+  // The partition key. Everything on this topic is about exactly one account.
+  int64 user_id = 1;
+
+  int64 timestamp_us = 2;
+
+  oneof payload {
+    FillSettled fill_settled = 10;
+    BalanceChanged balance_changed = 11;
+  }
+}
+
+// One of this user's orders filled, and this is what it cost them.
+//
+// Named "settled" rather than "executed" on purpose: TradeExecuted on the event topic is
+// the engine saying two orders crossed, with fee RATES and no idea which asset they are
+// charged in. This is settlement saying the row is written and the money moved, with the
+// amount actually taken. The two are not interchangeable and only one of them can answer
+// "what did that cost me".
+//
+// ONE SIDE ONLY. A trade involves two accounts; this describes one of them, and the
+// counterparty appears nowhere -- not their id, not their order, not their fee. Two
+// messages are published for one fill, one per participant, each built independently.
+message FillSettled {
+  bytes trade_id = 1;
+
+  // This user's own order, so a client can group fills under the order that produced them.
+  bytes order_id = 2;
+
+  string symbol = 3;
+
+  // Scaled by 1e8. The maker's price -- the taker got price improvement.
+  int64 price = 4;
+  int64 quantity = 5;
+  int64 quote_quantity = 6;
+
+  // What THIS user did, derived from the taker side rather than copied from it: if the
+  // taker bought, the taker is the buyer and the maker is the seller.
+  Side side = 7;
+
+  // Whether this user was the one resting. Not decoration -- maker and taker rates differ,
+  // and a maker rebate is why fee below is signed.
+  bool is_maker = 8;
+
+  // The amount charged, not a rate, and not recomputed: read back from what settlement
+  // persisted. Negative is a rebate. Charged in the asset this user received -- base for a
+  // buyer, quote for a seller -- which is why the asset travels with it.
+  // ...and the asset it was taken in, as an id rather than a symbol. Every producer here
+  // already holds ids and none holds symbols: making these names would mean a lookup on the
+  // exact path this design exists to keep free of I/O. Resolving an id to "USDT" is
+  // presentation, and a consumer rendering it is already resolving asset names anyway.
+  int64 fee = 9;
+  int64 fee_asset_id = 10;
+}
+
+// One asset's balance, after a change.
+//
+// ONLY THE ASSETS THAT CHANGED. A lock moves one, a fill moves two, so a message carries
+// one asset and says nothing about the rest. A CLIENT MUST NEVER TREAT THIS AS A FULL
+// ACCOUNT SNAPSHOT -- assets absent from a message are unchanged, not zero.
+//
+// ABSOLUTE, not a delta: free and locked as they now stand. A delta would have to be
+// applied exactly once in exactly the right order, and this topic guarantees neither.
+message BalanceChanged {
+  // An id, not a symbol -- see FillSettled.fee_asset_id. BalanceService holds no asset
+  // repository at all, so a name here would mean giving the single most contended class in
+  // the system a second query to run while it publishes.
+  int64 asset_id = 1;
+
+  // Scaled by 1e8. free + locked is the total; locked is what open orders are holding.
+  int64 free = 2;
+  int64 locked = 3;
+
+  // The balance row's own version, incremented by the database on every update.
+  //
+  // WITHOUT THIS THE TOPIC IS UNSAFE. Several processes publish these, each off its own
+  // thread after its own commit, so the order they reach a consumer is the order they
+  // happened to be sent -- not the order the writes occurred. A lock published by web-bff
+  // can arrive after the fill that consumed it, and a client applying them in arrival order
+  // would show funds held for an order that already filled, and stay wrong until that
+  // account's next change.
+  //
+  // Monotonic per (user, asset), because it comes from the row rather than the sender: the
+  // database serialises writers to it, so no clock and no producer ordering is involved.
+  // Compare per asset, never across assets. A consumer discards anything not newer than
+  // what it holds, and GET /bff/wallet/balances returns this same number so a reconnecting
+  // client can place its snapshot in sequence.
+  int64 version = 4;
+}
