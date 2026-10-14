@@ -208,4 +208,4 @@ Measured on my laptop against the running stack by `./gradlew perf`. The details
 
 You can use the code for free, but I am not responsible for any financial damanges caused by the flaw or bugs in the system.
 
-[Apache 2.0](LICENSE).
+Copyright 2026 Dohyun. Licensed under [Apache 2.0](LICENSE).
