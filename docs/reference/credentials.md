@@ -9,7 +9,8 @@
 Never store a raw secret. Sessions are **opaque tokens, not JWT**: setting `revoked_at` kills one
 instantly, where a JWT would need a blocklist, which is just this table again. A cookie being
 present does not mean logged in; only web-bff can tell, and the browser's gate is a client
-component that redirects on 401 ([frontend-session.md](frontend-session.md)).
+component that redirects on 401 ([frontend-session.md](frontend-session.md)). The mobile app
+holds the same token and sends it as a bearer; a browser is never given it outside the cookie.
 
 **No secret or config value has a default.** `API_KEY_ENCRYPTION_KEY` and `MFA_ENCRYPTION_KEY`
 are separate keys on purpose, and the app crashes at startup if one is missing. Never a

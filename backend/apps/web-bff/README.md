@@ -10,6 +10,9 @@ Its shape changes with the UI and is not a public surface; bots use spot-open-ap
 - **Consumes:** `events.v1` and `settlements.v1` for the sockets, one consumer group per
   instance so every instance can fan out.
 - Holds no state; sessions are rows, rate limits are in Redis.
+- **Two clients, one session:** the browser's httpOnly cookie, and the mobile app's
+  `Authorization: Bearer`, the same token, handed back as `X-Session-Token` only to a login sent
+  with `X-Session-Delivery: bearer` (`SessionCredentials`).
 
 Why the browser talks only to this app and how the session gate works:
 [frontend-session.md](../../../docs/reference/frontend-session.md). Where the trading gate sits:

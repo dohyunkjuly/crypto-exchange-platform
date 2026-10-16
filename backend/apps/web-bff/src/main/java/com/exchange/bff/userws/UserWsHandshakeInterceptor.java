@@ -4,7 +4,7 @@ import com.exchange.bff.common.security.TradingAccounts;
 import com.exchange.core.api.exception.ApiException;
 import org.springframework.web.util.UriComponentsBuilder;
 import com.exchange.bff.auth.AuthService;
-import com.exchange.bff.auth.SessionCookies;
+import com.exchange.bff.auth.SessionCredentials;
 import com.exchange.user.identity.User;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -26,10 +26,11 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
  * check has to be made again, here, at the only point in a socket's life where an HTTP
  * request exists.
  *
- * <p><b>The session cookie, not a listen-key.</b> A venue issues an opaque key when its
- * socket lives on a different host, where a cookie would not be sent. This one is
- * same-origin, so the browser already presents the session on the upgrade request and there
- * is no second credential to mint, leak in a URL, or expire on its own schedule. It resolves
+ * <p><b>The session, not a listen-key.</b> A venue issues an opaque key when its socket
+ * lives on a different host, where a cookie would not be sent. This one is same-origin, so
+ * the browser already presents the session cookie on the upgrade request, and the mobile app
+ * sends the same token as a bearer header ({@link SessionCredentials}); there is no second
+ * credential to mint, leak in a URL, or expire on its own schedule. It resolves
  * through {@link AuthService#validateSession} -- the same call {@code
  * AuthenticationInterceptor} makes, so a revoked session is refused here for the same reason
  * and at the same moment it would be over REST.
@@ -62,7 +63,8 @@ public class UserWsHandshakeInterceptor implements HandshakeInterceptor {
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler handler, Map<String, Object> attributes) {
-        String rawToken = readCookie(request);
+        String rawToken = request instanceof ServletServerHttpRequest servlet
+                ? SessionCredentials.read(servlet.getServletRequest()) : null;
         User user = rawToken == null ? null : authService.validateSession(rawToken).orElse(null);
         if (user == null) {
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
@@ -91,21 +93,5 @@ public class UserWsHandshakeInterceptor implements HandshakeInterceptor {
         if (exception != null) {
             log.debug("user WebSocket handshake failed", exception);
         }
-    }
-
-    private static String readCookie(ServerHttpRequest request) {
-        if (!(request instanceof ServletServerHttpRequest servlet)) {
-            return null;
-        }
-        jakarta.servlet.http.Cookie[] cookies = servlet.getServletRequest().getCookies();
-        if (cookies == null) {
-            return null;
-        }
-        for (jakarta.servlet.http.Cookie cookie : cookies) {
-            if (SessionCookies.COOKIE_NAME.equals(cookie.getName())) {
-                return cookie.getValue();
-            }
-        }
-        return null;
     }
 }

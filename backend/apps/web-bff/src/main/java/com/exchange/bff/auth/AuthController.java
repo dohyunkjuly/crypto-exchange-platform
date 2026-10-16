@@ -22,7 +22,6 @@ import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -70,7 +69,7 @@ public class AuthController {
         if (outcome.isMfaRequired()) {
             return LoginView.challenge(outcome.challengeToken());
         }
-        return LoginView.signedIn(setSession(outcome.session(), response));
+        return LoginView.signedIn(setSession(outcome.session(), http, response));
     }
 
     /**
@@ -89,7 +88,7 @@ public class AuthController {
         if (outcome.isMfaRequired()) {
             return LoginView.challenge(outcome.challengeToken());
         }
-        return LoginView.signedIn(setSession(outcome.session(), response));
+        return LoginView.signedIn(setSession(outcome.session(), http, response));
     }
 
     /**
@@ -128,22 +127,28 @@ public class AuthController {
                              HttpServletRequest http, HttpServletResponse response) {
         LoginResult result = authService.completeMfaLogin(request.challengeToken(),
                 request.code(), clientIp(http), http.getHeader(HttpHeaders.USER_AGENT));
-        return setSession(result, response);
+        return setSession(result, http, response);
     }
 
-    private UserView setSession(LoginResult result, HttpServletResponse response) {
-        response.addHeader(HttpHeaders.SET_COOKIE,
-                SessionCookies.set(result.sessionToken(), result.expiresAt()).toString());
+    /** The cookie for a browser, the token header for the app ({@link SessionCredentials}). */
+    private UserView setSession(LoginResult result, HttpServletRequest http,
+                                HttpServletResponse response) {
+        if (SessionCredentials.wantsBearer(http)) {
+            response.setHeader(SessionCredentials.TOKEN_HEADER, result.sessionToken());
+        } else {
+            response.addHeader(HttpHeaders.SET_COOKIE,
+                    SessionCookies.set(result.sessionToken(), result.expiresAt()).toString());
+        }
         return UserView.of(result.user());
     }
 
-    /** Idempotent, so a missing cookie is not an error -- there's simply nothing to log
-     *  out. Deliberately {@code @CookieValue}, not {@code @CurrentUser}: an already
-     *  invalid/expired token must still succeed here, not 401. */
+    /** Idempotent, so a missing token is not an error -- there's simply nothing to log
+     *  out. Deliberately not {@code @CurrentUser}: an already invalid/expired token must
+     *  still succeed here, not 401. */
     @DeleteMapping("/session")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void logout(@CookieValue(name = SessionCookies.COOKIE_NAME, required = false)
-                       String rawToken, HttpServletRequest http, HttpServletResponse response) {
+    public void logout(HttpServletRequest http, HttpServletResponse response) {
+        String rawToken = SessionCredentials.read(http);
         if (rawToken != null) {
             authService.logout(rawToken, clientIp(http));
         }
@@ -217,9 +222,8 @@ public class AuthController {
     @PostMapping("/password")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void changePassword(@Valid @RequestBody ChangePasswordRequest request, @CurrentUser User user,
-                               @CookieValue(name = SessionCookies.COOKIE_NAME) String sessionToken,
                                HttpServletRequest http) {
-        passwordChange.change(user, sessionToken, request.newPassword(), request.currentPassword(),
+        passwordChange.change(user, SessionCredentials.read(http), request.newPassword(), request.currentPassword(),
                 request.mfaCode(), clientIp(http));
     }
 

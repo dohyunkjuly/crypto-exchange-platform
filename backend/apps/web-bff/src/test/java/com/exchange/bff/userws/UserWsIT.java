@@ -178,6 +178,28 @@ class UserWsIT {
         assertThat(order.get("filledQuantity").asText()).isEqualTo("0");
     }
 
+    /** The mobile app: no cookie and no Origin, the session as a bearer on the upgrade. */
+    @Test
+    @DisplayName("the app's bearer token opens the private socket")
+    void aBearerOpensTheSocket() throws Exception {
+        Session mine = signIn();
+        WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
+        headers.setBearerAuth(mine.token());
+        BlockingQueue<String> frames = new LinkedBlockingQueue<>();
+        sessions.add(open(headers, frames, ""));
+        awaitConnected(mine.userId());
+        awaitPartitionAssignment();
+
+        UUID orderId = UUID.randomUUID();
+        publish(accepted(mine.userId(), 1, orderId));
+
+        assertThat(awaitFrame(frames).get("data").get("orderId").asText()).isEqualTo(orderId.toString());
+
+        WebSocketHttpHeaders forged = new WebSocketHttpHeaders();
+        forged.setBearerAuth("not-a-real-token");
+        assertThatThrownBy(() -> open(forged, new LinkedBlockingQueue<>(), "")).hasMessageContaining("401");
+    }
+
     @Test
     @DisplayName("a parked stop arrives waiting for its trigger, with what it waits on")
     void aParkedStopArrivesAsPendingTrigger() throws Exception {
@@ -442,7 +464,8 @@ class UserWsIT {
 
     // ------------------------------------------------------------------ helpers
 
-    private record Session(HttpHeaders headers, long userId) {
+    /** @param token the raw session token, as the app would hold it */
+    private record Session(HttpHeaders headers, long userId, String token) {
     }
 
     private Session signIn() {
@@ -457,16 +480,16 @@ class UserWsIT {
                 body(Map.of("email", email, "password", password)), Map.class);
         assertThat(loggedIn.getStatusCode()).isEqualTo(HttpStatus.OK);
 
+        String cookie = loggedIn.getHeaders().get(HttpHeaders.SET_COOKIE).get(0).split(";", 2)[0];
         HttpHeaders headers = new HttpHeaders();
-        headers.add(HttpHeaders.COOKIE,
-                loggedIn.getHeaders().get(HttpHeaders.SET_COOKIE).get(0).split(";", 2)[0]);
+        headers.add(HttpHeaders.COOKIE, cookie);
 
         Map<String, Object> me = (Map<String, Object>) rest.exchange(
                 RequestEntity.get(URI.create(url("/bff/auth/me"))).headers(headers).build(),
                 Map.class).getBody().get("data");
         long userId = ((Number) me.get("id")).longValue();
         createdUserIds.add(userId);
-        return new Session(headers, userId);
+        return new Session(headers, userId, cookie.substring(cookie.indexOf('=') + 1));
     }
 
     private BlockingQueue<String> connect(Session session) throws Exception {

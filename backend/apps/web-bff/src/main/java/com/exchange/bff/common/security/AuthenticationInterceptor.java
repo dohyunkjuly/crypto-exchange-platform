@@ -1,15 +1,13 @@
 package com.exchange.bff.common.security;
 
 import com.exchange.bff.auth.AuthService;
-import com.exchange.bff.auth.SessionCookies;
+import com.exchange.bff.auth.SessionCredentials;
 import com.exchange.bff.common.errors.BffHttpErrorCode;
 import com.exchange.core.api.exception.ApiException;
 import com.exchange.user.identity.User;
 import org.springframework.web.cors.CorsUtils;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.util.Arrays;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -50,24 +48,12 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        String rawToken = readCookie(request);
+        String rawToken = SessionCredentials.read(request);
         User user = rawToken == null ? null : authService.validateSession(rawToken).orElse(null);
         if (user == null) {
             throw new ApiException(BffHttpErrorCode.NOT_AUTHENTICATED);
         }
         request.setAttribute(CURRENT_USER_ATTRIBUTE, user);
         return true;
-    }
-
-    private String readCookie(HttpServletRequest request) {
-        Cookie[] cookies = request.getCookies();
-        if (cookies == null) {
-            return null;
-        }
-        return Arrays.stream(cookies)
-                .filter(cookie -> SessionCookies.COOKIE_NAME.equals(cookie.getName()))
-                .map(Cookie::getValue)
-                .findFirst()
-                .orElse(null);
     }
 }
