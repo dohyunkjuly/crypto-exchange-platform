@@ -285,7 +285,7 @@ class OrderEffectServiceTest {
     @Test
     void applyCancel_forASellOrderPartiallyFilled_unlocksOnlyTheRemainingBaseQuantity() {
         SpotOrder order = limitOrder(Side.SELL, QUANTITY);
-        order.setFilledQuantity(30_000_000L); // 0.3 of 1.0 filled
+        order.applyFill(30_000_000L, 30_000_000L * (PRICE / QUANTITY)); // 0.3 of 1.0 filled
         when(spotOrders.findById(order.getId())).thenReturn(Optional.of(order));
 
         List<BalanceMutation> mutations = service.applyCancel(symbol, canceled(order.getId()));
@@ -300,7 +300,7 @@ class OrderEffectServiceTest {
     @Test
     void applyCancel_forAQuoteOrderQtyBuy_unlocksTheRemainingQuoteBudget() {
         SpotOrder order = marketBuyByQuote(1_000_000_000L); // $10 budget
-        order.setCumulativeQuoteQuantity(400_000_000L); // $4 already spent
+        order.applyFill(1L, 400_000_000L); // $4 already spent
         when(spotOrders.findById(order.getId())).thenReturn(Optional.of(order));
 
         List<BalanceMutation> mutations = service.applyCancel(symbol, canceled(order.getId()));

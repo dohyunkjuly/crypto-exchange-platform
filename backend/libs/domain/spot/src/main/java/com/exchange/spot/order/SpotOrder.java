@@ -100,11 +100,15 @@ public class SpotOrder implements Persistable<UUID> {
     @Setter(AccessLevel.NONE)
     private Long quoteOrderQty;
 
+    /** Moves only through {@link #applyFill}, which refuses an overfill; in the database only
+     *  through the conditional UPDATE in {@code SpotOrderRepository.applyFillAtomically}. */
     @Column(nullable = false)
+    @Setter(AccessLevel.NONE)
     private long filledQuantity;
 
     /** Sum of price*qty over fills, so average price is a division not an aggregate. */
     @Column(nullable = false)
+    @Setter(AccessLevel.NONE)
     private long cumulativeQuoteQuantity;
 
     @Enumerated(EnumType.STRING)
