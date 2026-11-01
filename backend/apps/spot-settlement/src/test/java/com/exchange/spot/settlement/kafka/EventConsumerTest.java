@@ -147,13 +147,16 @@ class EventConsumerTest {
     }
 
     @Test
-    void onEvents_whenAGroupFails_doesNotAcknowledgeTheBatch() {
+    void onEvents_whenAGroupFails_handsTheBatchBack() {
         when(orderEffects.applyReject(any(), any())).thenReturn(List.of(mutation(1L, 10L, "k")));
         doThrow(new IllegalStateException("db write failed"))
                 .when(balanceEffects).applyGroup(any());
 
         consumer.onEvents(records(rejectEvent()), ack);
 
+        // Not acknowledging alone would not bring the batch back: the consumer polls on
+        // regardless, and the next acknowledge would commit past it.
+        verify(ack).nack(0, EventConsumer.RETRY_AFTER);
         verify(ack, never()).acknowledge();
     }
 
@@ -176,13 +179,14 @@ class EventConsumerTest {
     }
 
     @Test
-    void onEvents_exhaustsRetriesOnARepeatedDeadlockAndDoesNotAcknowledge() {
+    void onEvents_exhaustsRetriesOnARepeatedDeadlockAndHandsTheBatchBack() {
         when(orderEffects.applyReject(any(), any())).thenReturn(List.of(mutation(1L, 10L, "k")));
         doThrow(new CannotAcquireLockException("deadlock")).when(balanceEffects).applyGroup(any());
 
         consumer.onEvents(records(rejectEvent()), ack);
 
         verify(balanceEffects, times(4)).applyGroup(any()); // 1 initial + 3 retries
+        verify(ack).nack(0, EventConsumer.RETRY_AFTER);
         verify(ack, never()).acknowledge();
     }
 
@@ -194,6 +198,7 @@ class EventConsumerTest {
         consumer.onEvents(records(rejectEvent()), ack);
 
         verify(balanceEffects, times(1)).applyGroup(any());
+        verify(ack).nack(0, EventConsumer.RETRY_AFTER);
         verify(ack, never()).acknowledge();
     }
 

@@ -128,8 +128,10 @@ A publish that fails is retried in-process with the *same* computed events, neve
 the command against the live book; past a bounded number of attempts the process exits so a
 supervisor restarts it into the safe replay path. `PublishRetryDoesNotReprocessIT` is the test.
 
-Settlement acknowledges a batch only after every effect committed. Anything that fails leaves
-the batch unacknowledged for redelivery. Two things are dropped rather than retried, because
+Settlement acknowledges a batch only after every effect committed. Anything that fails hands
+the batch back with `nack`, which rewinds the consumer to its first record so the next poll
+returns it; Kafka never resends on its own, and a batch merely left unacknowledged would be
+stepped over by the next commit. Two things are dropped rather than retried, because
 retrying cannot fix them and a stuck partition stops every market on it: a market MySQL does
 not know, and a trade with the same user on both sides.
 

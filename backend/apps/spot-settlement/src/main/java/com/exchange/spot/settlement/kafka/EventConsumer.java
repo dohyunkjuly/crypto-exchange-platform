@@ -12,6 +12,7 @@ import com.exchange.spot.settlement.trade.OrderEffectService.TradeToRecord;
 import com.exchange.spot.symbol.SpotSymbol;
 import com.exchange.spot.symbol.SpotSymbolRepository;
 import com.google.protobuf.InvalidProtocolBufferException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -57,6 +58,10 @@ import org.springframework.stereotype.Component;
  *       read an order's current state to compute the unlock, and their own unlock mutations do
  *       not exist until this step has run.
  * </ol>
+ *
+ * <p>A batch that fails is handed back with {@code nack}, which rewinds the consumer to its
+ * first record. Returning without acknowledging would not: the client keeps polling forward
+ * on its own, and the next batch's commit would step over this one, losing its fills.
  */
 @Component
 public class EventConsumer {
@@ -67,6 +72,10 @@ public class EventConsumer {
      *  competing transactions finishing, not dozens -- see {@link #withDeadlockRetry}. */
     private static final int MAX_DEADLOCK_RETRIES = 3;
     private static final long RETRY_BASE_DELAY_MS = 25;
+
+    /** Short, because a fill waits on it: long enough not to hammer a database that is down,
+     *  short enough that a blip barely shows. A failing batch is retried forever. */
+    static final Duration RETRY_AFTER = Duration.ofMillis(500);
 
     private final SpotSymbolRepository spotSymbols;
     private final OrderEffectService orderEffects;
@@ -117,8 +126,9 @@ public class EventConsumer {
             // their own unlock mutations necessarily follow them.
             dispatchGroups(groupByBalanceRow(applyOrderStateEvents(settleable, symbolCache)));
         } catch (RuntimeException e) {
-            log.error("failed to settle a batch of {} events; not acknowledging, will redeliver",
+            log.error("failed to settle a batch of {} events; handing it back to be read again",
                     records.size(), e);
+            ack.nack(0, RETRY_AFTER);
             return;
         }
         ack.acknowledge();

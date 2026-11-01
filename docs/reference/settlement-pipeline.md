@@ -97,7 +97,7 @@ never skip them because a sibling effect already landed.
 |---|---|
 | A malformed record | Logged and skipped. The rest of the batch proceeds normally. |
 | One group hits a transient database lock conflict | Retried in place a few times with a short backoff. No other group is affected. |
-| Anything else fails, such as a real bug or a lock conflict that outlasts its retries | The whole batch is left unacknowledged and Kafka redelivers it later. That is safe, because every effect above does nothing the second time. |
+| Anything else fails, such as a real bug or a lock conflict that outlasts its retries | The whole batch is handed back with `nack`, which rewinds the consumer to the batch's first record, and it is read again after a short pause, forever. That is safe, because every effect above does nothing the second time. Not acknowledging alone would not bring it back: the consumer polls on regardless, and the next batch's commit would step over it. |
 
 ## Configuration that matters
 

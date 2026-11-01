@@ -241,14 +241,16 @@ class EventConsumerTest {
         verify(ack).acknowledge();
     }
 
-    /** Not acknowledging is the whole retry mechanism: the batch is redelivered on the next
-     *  poll, and both writers are idempotent so replaying it is safe. */
+    /** Handing the batch back is the whole retry mechanism: nack rewinds the consumer to the
+     *  batch's first record so the next poll returns it, and every writer is idempotent so
+     *  replaying it is safe. Not acknowledging alone would not bring it back. */
     @Test
-    void aFailedWriteLeavesTheBatchUnacknowledged() {
+    void aFailedWriteHandsTheBatchBack() {
         doThrow(new IllegalStateException("mongo is down")).when(depth).apply(anyList());
 
         consume(trade(1, Side.SIDE_BUY, PRICE, 2 * ONE));
 
+        verify(ack).nack(0, EventConsumer.RETRY_AFTER);
         verify(ack, never()).acknowledge();
     }
 

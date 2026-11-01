@@ -14,6 +14,7 @@ import com.exchange.marketdata.ingest.DepthWriter.LevelDelta;
 import com.exchange.marketdata.ingest.TradeTapeWriter.TapeEntry;
 import com.exchange.marketdata.tape.PublicTrade;
 import com.google.protobuf.InvalidProtocolBufferException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -42,8 +43,10 @@ import org.springframework.stereotype.Component;
  *
  * <p>Failure handling follows {@code spot-settlement}'s precedent, with one deliberate
  * difference in what it means. A malformed record is a poison pill -- logged and skipped,
- * because retrying will never parse it. Anything else leaves the batch unacknowledged for
- * redelivery, which is safe because both writers are idempotent. The difference is the
+ * because retrying will never parse it. Anything else hands the batch back with {@code nack},
+ * which rewinds the consumer to its first record -- returning without acknowledging would
+ * not, the next batch's commit would step over it -- and that is safe because every writer
+ * is idempotent. The difference is the
  * stakes: a batch stuck here means charts and the book lag and then catch up on their own,
  * whereas the same situation in settlement means balances are behind. That is the entire
  * reason these are two processes.
@@ -57,6 +60,9 @@ public class EventConsumer {
      *  futures listener would sit beside it and pass Market.FUTURES -- the reason ids carry
      *  a product at all, see Market's javadoc. */
     private static final Market MARKET = Market.SPOT;
+
+    /** Long enough not to hammer a store that is down, short enough that a blip barely shows. */
+    static final Duration RETRY_AFTER = Duration.ofMillis(500);
 
     private final CandleWriter candles;
     private final DepthWriter depth;
@@ -95,8 +101,9 @@ public class EventConsumer {
             depth.apply(deltas);
             tape.apply(prints);
         } catch (RuntimeException e) {
-            log.error("failed to build market data for a batch of {} events; not "
-                    + "acknowledging, will redeliver", records.size(), e);
+            log.error("failed to build market data for a batch of {} events; handing it back "
+                    + "to be read again", records.size(), e);
+            ack.nack(0, RETRY_AFTER);
             return;
         }
         ack.acknowledge();
