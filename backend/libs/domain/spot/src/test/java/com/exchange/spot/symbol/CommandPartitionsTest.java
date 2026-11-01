@@ -8,7 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.exchange.common.kafka.Topics;
-import com.exchange.spot.order.exception.MarketUnavailableException;
+import com.exchange.spot.order.exception.OrderExceptions.MarketUnavailableException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;

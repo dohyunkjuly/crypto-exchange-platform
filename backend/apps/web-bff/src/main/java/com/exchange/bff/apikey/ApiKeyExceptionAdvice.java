@@ -2,8 +2,8 @@ package com.exchange.bff.apikey;
 
 import com.exchange.bff.common.errors.BffHttpErrorCode;
 import com.exchange.core.api.response.HttpApiResponse;
-import com.exchange.user.apikey.exception.ApiKeyNotFoundException;
-import com.exchange.user.apikey.exception.WithdrawalRequiresAllowlistException;
+import com.exchange.user.apikey.exception.ApiKeyExceptions.ApiKeyNotFoundException;
+import com.exchange.user.apikey.exception.ApiKeyExceptions.WithdrawalRequiresAllowlistException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

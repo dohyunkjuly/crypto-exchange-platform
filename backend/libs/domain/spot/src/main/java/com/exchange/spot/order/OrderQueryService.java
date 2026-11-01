@@ -2,7 +2,7 @@ package com.exchange.spot.order;
 
 import com.exchange.spot.history.TimeRange;
 import com.exchange.spot.order.dto.OrderDetail;
-import com.exchange.spot.order.exception.OrderNotFoundException;
+import com.exchange.spot.order.exception.OrderExceptions.OrderNotFoundException;
 import com.exchange.spot.symbol.SpotSymbol;
 import com.exchange.spot.symbol.SpotSymbolRepository;
 import java.util.Collection;

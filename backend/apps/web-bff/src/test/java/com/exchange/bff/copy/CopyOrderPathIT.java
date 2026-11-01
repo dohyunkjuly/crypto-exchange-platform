@@ -13,7 +13,7 @@ import com.exchange.copy.leadorder.CopyLeadOrderRepository;
 import com.exchange.spot.order.OrderService;
 import com.exchange.spot.order.Side;
 import com.exchange.spot.order.SubAccountOrderHook;
-import com.exchange.spot.order.exception.ManualOrderNotAllowedException;
+import com.exchange.spot.order.exception.OrderExceptions.ManualOrderNotAllowedException;
 import com.exchange.spot.symbol.SpotSymbol;
 import com.exchange.spot.symbol.SpotSymbolRepository;
 import com.exchange.user.identity.SubPurpose;

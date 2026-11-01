@@ -2,8 +2,8 @@ package com.exchange.bff.wallet;
 
 import com.exchange.bff.common.errors.BffHttpErrorCode;
 import com.exchange.core.api.response.HttpApiResponse;
-import com.exchange.wallet.asset.exception.AssetNotFoundException;
-import com.exchange.wallet.balance.exception.InsufficientBalanceException;
+import com.exchange.wallet.asset.exception.AssetExceptions.AssetNotFoundException;
+import com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

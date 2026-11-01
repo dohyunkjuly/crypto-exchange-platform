@@ -11,7 +11,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.exchange.wallet.balance.exception.InsufficientBalanceException;
+import com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException;
 import com.exchange.wallet.ledger.LedgerEntry;
 import com.exchange.wallet.ledger.LedgerEntryRepository;
 import com.exchange.wallet.ledger.LedgerEntryType;

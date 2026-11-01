@@ -2,11 +2,11 @@ package com.exchange.spot.openapi.common.security;
 
 import com.exchange.core.api.response.HttpApiResponse;
 import com.exchange.spot.openapi.common.errors.OpenApiErrorCode;
-import com.exchange.user.eligibility.exception.EmailNotVerifiedException;
-import com.exchange.user.eligibility.exception.KycRequiredException;
-import com.exchange.user.eligibility.exception.AccountFrozenException;
-import com.exchange.user.eligibility.exception.MfaRequiredException;
-import com.exchange.user.eligibility.exception.TradingSuspendedException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.EmailNotVerifiedException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.KycRequiredException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.AccountFrozenException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.MfaRequiredException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.TradingSuspendedException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

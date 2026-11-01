@@ -7,7 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.exchange.user.audit.UserAuthEventRepository;
-import com.exchange.user.eligibility.exception.EmailNotVerifiedException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.EmailNotVerifiedException;
 import com.exchange.user.identity.User;
 import com.exchange.user.identity.UserRepository;
 import java.time.LocalDate;

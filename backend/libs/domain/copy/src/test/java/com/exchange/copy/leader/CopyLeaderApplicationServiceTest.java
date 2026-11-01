@@ -9,12 +9,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 
 import com.exchange.common.id.Ulid;
-import com.exchange.copy.leader.exception.LeadAmountOutOfRangeException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeadAmountOutOfRangeException;
 import com.exchange.copy.leader.CopyLeader;
 import com.exchange.copy.settings.CopySettings;
 import com.exchange.copy.settings.CopySettingsRepository;
 import com.exchange.user.eligibility.EligibilityService;
-import com.exchange.user.eligibility.exception.KycRequiredException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.KycRequiredException;
 import com.exchange.wallet.asset.Asset;
 import com.exchange.wallet.asset.AssetService;
 import com.exchange.wallet.transfer.TransferService;

@@ -1,11 +1,11 @@
 package com.exchange.copy.leader;
 
 import com.exchange.copy.follow.CopyCloseService;
-import com.exchange.copy.leader.exception.AlreadyLeaderException;
-import com.exchange.copy.leader.exception.DisplayNameTakenException;
-import com.exchange.copy.leader.exception.LeaderNotFoundException;
-import com.exchange.copy.leader.exception.LeaderStatusException;
-import com.exchange.copy.leader.exception.NotALeaderException;
+import com.exchange.copy.leader.exception.LeaderExceptions.AlreadyLeaderException;
+import com.exchange.copy.leader.exception.LeaderExceptions.DisplayNameTakenException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeaderNotFoundException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeaderStatusException;
+import com.exchange.copy.leader.exception.LeaderExceptions.NotALeaderException;
 import com.exchange.copy.follow.CopyFollowRepository;
 import com.exchange.copy.follow.FollowStatus;
 import com.exchange.copy.leader.CopyLeader;

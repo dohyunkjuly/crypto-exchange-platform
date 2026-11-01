@@ -68,7 +68,7 @@ public class KycController {
     /**
      * Submits the details and puts the profile in review. Grants nothing on its own.
      *
-     * @throws com.exchange.user.kyc.exception.KycAlreadyVerifiedException the account is
+     * @throws com.exchange.user.kyc.exception.KycExceptions.KycAlreadyVerifiedException the account is
      *         already verified -- resubmitting would drop it back to PENDING and revoke
      *         what it had unlocked
      */

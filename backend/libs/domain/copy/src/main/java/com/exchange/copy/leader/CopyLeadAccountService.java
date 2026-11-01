@@ -1,8 +1,8 @@
 package com.exchange.copy.leader;
 
 import com.exchange.copy.settings.CopyQuoteAsset;
-import com.exchange.copy.leader.exception.LeadBalanceBelowMinimumException;
-import com.exchange.copy.leader.exception.NotALeaderException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeadBalanceBelowMinimumException;
+import com.exchange.copy.leader.exception.LeaderExceptions.NotALeaderException;
 import com.exchange.copy.leader.CopyLeader;
 import com.exchange.copy.leader.CopyLeaderRepository;
 import com.exchange.copy.leader.LeaderStatus;

@@ -142,7 +142,7 @@ public class AuthService {
      *
      * @throws ApiException            the challenge is unknown, expired, or was burned by
      *                                 too many wrong codes
-     * @throws com.exchange.user.mfa.exception.InvalidMfaCodeException the code is wrong,
+     * @throws com.exchange.user.mfa.exception.MfaExceptions.InvalidMfaCodeException the code is wrong,
      *                                 expired, or already spent
      */
     @Transactional

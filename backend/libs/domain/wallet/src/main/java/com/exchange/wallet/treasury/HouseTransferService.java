@@ -29,7 +29,7 @@ public class HouseTransferService {
 
     /**
      * @return false when this id has moved money before, and nothing was done now
-     * @throws com.exchange.wallet.balance.exception.InsufficientBalanceException the sender's available is short
+     * @throws com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException the sender's available is short
      */
     @Transactional
     public boolean move(UUID id, Long fromUserId, Long toUserId, Long assetId, long amount) {

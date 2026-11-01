@@ -22,15 +22,15 @@ import com.exchange.spot.limit.exchange.SpotExchangeOrderLimitsRepository;
 import com.exchange.spot.limit.override.SpotUserOrderLimitOverrideRepository;
 import com.exchange.spot.limit.symbol.SpotSymbolUserOrderLimitOverrideRepository;
 import com.exchange.spot.order.dto.OrderDetail;
-import com.exchange.spot.order.exception.AlgoOrderLimitExceededException;
-import com.exchange.spot.order.exception.InvalidStopPriceException;
-import com.exchange.spot.order.exception.InvalidTrailingDeltaException;
-import com.exchange.spot.order.exception.OrderLimitExceededException;
-import com.exchange.spot.order.exception.QuoteOrderQtyNotSupportedException;
-import com.exchange.spot.order.exception.QuoteOrderQtyRequiredException;
-import com.exchange.spot.order.exception.TimeInForceNotSupportedException;
-import com.exchange.spot.order.exception.EngineUnavailableException;
-import com.exchange.spot.order.exception.SymbolNotTradingException;
+import com.exchange.spot.order.exception.OrderExceptions.AlgoOrderLimitExceededException;
+import com.exchange.spot.order.exception.OrderExceptions.InvalidStopPriceException;
+import com.exchange.spot.order.exception.OrderExceptions.InvalidTrailingDeltaException;
+import com.exchange.spot.order.exception.OrderExceptions.OrderLimitExceededException;
+import com.exchange.spot.order.exception.OrderExceptions.QuoteOrderQtyNotSupportedException;
+import com.exchange.spot.order.exception.OrderExceptions.QuoteOrderQtyRequiredException;
+import com.exchange.spot.order.exception.OrderExceptions.TimeInForceNotSupportedException;
+import com.exchange.spot.order.exception.OrderExceptions.EngineUnavailableException;
+import com.exchange.spot.order.exception.OrderExceptions.SymbolNotTradingException;
 import com.exchange.spot.symbol.SpotSymbol;
 import com.exchange.spot.symbol.SpotSymbolRepository;
 import com.exchange.spot.symbol.SymbolStatus;
@@ -490,11 +490,11 @@ class OrderServiceTest {
     /** Refused before anything is locked or saved: a market that cannot publish takes no money. */
     @Test
     void a_market_whose_partition_does_not_exist_takes_no_order_and_locks_nothing() {
-        org.mockito.Mockito.doThrow(new com.exchange.spot.order.exception.MarketUnavailableException(SYMBOL))
+        org.mockito.Mockito.doThrow(new com.exchange.spot.order.exception.OrderExceptions.MarketUnavailableException(SYMBOL))
                 .when(commandPartitions).requireExists(symbol);
 
         assertThatThrownBy(() -> limit(Side.BUY, "63250.00", "0.5"))
-                .isInstanceOf(com.exchange.spot.order.exception.MarketUnavailableException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.MarketUnavailableException.class);
         verify(balanceService, never()).lock(any(), any(), anyLong(), any(), any(), any());
         verify(spotOrders, never()).save(any());
         verify(kafka, never()).send(anyString(), anyInt(), anyString(), any(byte[].class));
@@ -516,7 +516,7 @@ class OrderServiceTest {
         assertThatThrownBy(() -> orderService.placeOrder(USER_ID, SYMBOL, Side.BUY, OrderType.LIMIT, TimeInForce.FOK,
                 "63250.00", null, "0.5", null, null,
                 com.exchange.contracts.spot.v1.SelfTradePreventionMode.SELF_TRADE_PREVENTION_MODE_EXPIRE_BOTH, null))
-                .isInstanceOf(com.exchange.spot.order.exception.FokWithExpireBothNotSupportedException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.FokWithExpireBothNotSupportedException.class);
         verify(balanceService, never()).lock(any(), any(), anyLong(), any(), any(), any());
         verify(kafka, never()).send(anyString(), anyInt(), anyString(), any(byte[].class));
     }
@@ -678,7 +678,7 @@ class OrderServiceTest {
         SpotOrder order = resting(Side.BUY, OrderType.LIMIT, TimeInForce.GTC);
 
         assertThatThrownBy(() -> orderService.amendOrder(2L, order.getId(), "110.00", null, null, null))
-                .isInstanceOf(com.exchange.spot.order.exception.OrderNotFoundException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.OrderNotFoundException.class);
         verify(kafka, never()).send(anyString(), anyInt(), anyString(), any(byte[].class));
     }
 
@@ -689,7 +689,7 @@ class OrderServiceTest {
         when(spotOrders.isAmendPending(order.getId())).thenReturn(true);
 
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), "110.00", null, null, null))
-                .isInstanceOf(com.exchange.spot.order.exception.AmendPendingException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.AmendPendingException.class);
         verify(balanceService, never()).lock(any(), any(), anyLong(), any(), any(), any());
         verify(kafka, never()).send(anyString(), anyInt(), anyString(), any(byte[].class));
     }
@@ -698,10 +698,10 @@ class OrderServiceTest {
     void insufficient_balance_sends_nothing() {
         SpotOrder order = resting(Side.BUY, OrderType.LIMIT, TimeInForce.GTC);
         when(balanceService.lock(any(), any(), anyLong(), any(), any(), any()))
-                .thenThrow(new com.exchange.wallet.balance.exception.InsufficientBalanceException(USER_ID, QUOTE_ASSET_ID, 20, 0));
+                .thenThrow(new com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException(USER_ID, QUOTE_ASSET_ID, 20, 0));
 
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), "110.00", null, null, null))
-                .isInstanceOf(com.exchange.wallet.balance.exception.InsufficientBalanceException.class);
+                .isInstanceOf(com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException.class);
         verify(kafka, never()).send(anyString(), anyInt(), anyString(), any(byte[].class));
     }
 
@@ -713,7 +713,7 @@ class OrderServiceTest {
 
         for (SpotOrder order : List.of(filled, ioc)) {
             assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), "110.00", null, null, null))
-                    .isInstanceOf(com.exchange.spot.order.exception.OrderNotAmendableException.class);
+                    .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.OrderNotAmendableException.class);
         }
     }
 
@@ -722,9 +722,9 @@ class OrderServiceTest {
         SpotOrder order = resting(Side.BUY, OrderType.LIMIT, TimeInForce.GTC);
 
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), "100.00", null, "2", null))
-                .isInstanceOf(com.exchange.spot.order.exception.NothingToAmendException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.NothingToAmendException.class);
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), null, null, null, null))
-                .isInstanceOf(com.exchange.spot.order.exception.NothingToAmendException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.NothingToAmendException.class);
     }
 
     @Test
@@ -733,9 +733,9 @@ class OrderServiceTest {
         order.applyFill(ONE, 100 * ONE);
 
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), null, null, "1", null))
-                .isInstanceOf(com.exchange.spot.order.exception.InvalidQuantityException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.InvalidQuantityException.class);
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), "100.50", null, null, null))
-                .isInstanceOf(com.exchange.spot.order.exception.InvalidPriceException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.InvalidPriceException.class);
     }
 
     @Test
@@ -743,7 +743,7 @@ class OrderServiceTest {
         SpotOrder order = resting(Side.BUY, OrderType.LIMIT, TimeInForce.GTC);
 
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, order.getId(), null, "90.00", null, null))
-                .isInstanceOf(com.exchange.spot.order.exception.FieldNotAmendableException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.FieldNotAmendableException.class);
     }
 
     @Test
@@ -757,7 +757,7 @@ class OrderServiceTest {
         when(spotOrders.claimAmend(eq(trailing.getId()), any())).thenReturn(1);
 
         assertThatThrownBy(() -> orderService.amendOrder(USER_ID, trailing.getId(), null, "80.00", null, null))
-                .isInstanceOf(com.exchange.spot.order.exception.FieldNotAmendableException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.FieldNotAmendableException.class);
 
         orderService.amendOrder(USER_ID, trailing.getId(), null, null, "3", null);
         assertThat(sentAmend().getNewQuantity()).isEqualTo(3 * ONE);
@@ -787,12 +787,12 @@ class OrderServiceTest {
     @Test
     @DisplayName("an order the hook refuses locks nothing, saves nothing and sends nothing")
     void a_refused_sub_order_leaves_nothing_behind() {
-        org.mockito.Mockito.doThrow(new com.exchange.spot.order.exception.ManualOrderNotAllowedException("no"))
+        org.mockito.Mockito.doThrow(new com.exchange.spot.order.exception.OrderExceptions.ManualOrderNotAllowedException("no"))
                 .when(subAccountHook).beforeLock(any(), any(), any(), any(), anyLong(), anyLong());
 
         assertThatThrownBy(() -> orderService.placeOrder(USER_ID, 9L, SYMBOL, Side.SELL, OrderType.LIMIT,
                 TimeInForce.GTC, "63250.00", null, "0.5", null, null, null, null))
-                .isInstanceOf(com.exchange.spot.order.exception.ManualOrderNotAllowedException.class);
+                .isInstanceOf(com.exchange.spot.order.exception.OrderExceptions.ManualOrderNotAllowedException.class);
 
         verify(balanceService, never()).lock(any(), any(), anyLong(), any(), anyString(), anyString());
         verify(spotOrders, never()).save(any());

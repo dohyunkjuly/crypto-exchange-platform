@@ -34,9 +34,9 @@ public class TradingEligibilityInterceptor implements HandlerInterceptor {
         this.eligibility = eligibility;
     }
 
-    /** @throws com.exchange.user.eligibility.exception.KycRequiredException not verified
+    /** @throws com.exchange.user.eligibility.exception.EligibilityExceptions.KycRequiredException not verified
      *          far enough, or verification lapsed
-     *  @throws com.exchange.user.eligibility.exception.MfaRequiredException no second
+     *  @throws com.exchange.user.eligibility.exception.EligibilityExceptions.MfaRequiredException no second
      *          factor */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response,

@@ -15,7 +15,7 @@ import com.exchange.user.identity.UserRepository;
 import com.exchange.user.identity.UserType;
 import com.exchange.wallet.asset.Asset;
 import com.exchange.wallet.asset.AssetService;
-import com.exchange.wallet.balance.exception.InsufficientBalanceException;
+import com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException;
 import com.exchange.wallet.treasury.HouseTransferService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;

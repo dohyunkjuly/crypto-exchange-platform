@@ -7,8 +7,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 
 import com.exchange.common.id.Ulid;
-import com.exchange.copy.leader.exception.LeadBalanceBelowMinimumException;
-import com.exchange.copy.leader.exception.NotALeaderException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeadBalanceBelowMinimumException;
+import com.exchange.copy.leader.exception.LeaderExceptions.NotALeaderException;
 import com.exchange.copy.leader.CopyLeader;
 import com.exchange.copy.leader.CopyLeaderRepository;
 import com.exchange.copy.leader.LeaderStatus;

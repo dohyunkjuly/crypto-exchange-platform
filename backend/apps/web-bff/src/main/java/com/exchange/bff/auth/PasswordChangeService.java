@@ -52,7 +52,7 @@ public class PasswordChangeService {
     }
 
     /**
-     * @throws com.exchange.user.mfa.exception.InvalidMfaCodeException 2FA is on and the code is
+     * @throws com.exchange.user.mfa.exception.MfaExceptions.InvalidMfaCodeException 2FA is on and the code is
      *         missing or wrong -- the current password does not stand in for it
      * @throws ApiException {@code TOO_MANY_ATTEMPTS}, {@code NO_PASSWORD_SET} (2FA off and
      *         nothing to check: a Google-only account), {@code INVALID_CURRENT_PASSWORD}

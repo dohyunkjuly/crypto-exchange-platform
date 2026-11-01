@@ -56,7 +56,7 @@ public class MfaController {
     /**
      * Step one: mint a secret to scan. Activates nothing.
      *
-     * @throws com.exchange.user.mfa.exception.MfaAlreadyEnabledException a factor is
+     * @throws com.exchange.user.mfa.exception.MfaExceptions.MfaAlreadyEnabledException a factor is
      *         already active -- disable it first, which itself requires passing it, so a
      *         stolen session cannot quietly swap the factor for its own
      */

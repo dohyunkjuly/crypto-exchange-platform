@@ -1,6 +1,6 @@
 package com.exchange.wallet.balance;
 
-import com.exchange.wallet.balance.exception.InsufficientBalanceException;
+import com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;

@@ -4,8 +4,8 @@ import com.exchange.common.crypto.AesGcmCipher;
 import com.exchange.user.apikey.dto.CreatedApiKey;
 import com.exchange.user.eligibility.EligibilityService;
 import com.exchange.user.mfa.MfaService;
-import com.exchange.user.apikey.exception.ApiKeyNotFoundException;
-import com.exchange.user.apikey.exception.WithdrawalRequiresAllowlistException;
+import com.exchange.user.apikey.exception.ApiKeyExceptions.ApiKeyNotFoundException;
+import com.exchange.user.apikey.exception.ApiKeyExceptions.WithdrawalRequiresAllowlistException;
 import com.exchange.user.audit.AuthEventType;
 import com.exchange.user.audit.AuthOutcome;
 import com.exchange.user.audit.UserAuthEvent;
@@ -52,7 +52,7 @@ public class ApiKeyService {
      * deferred.
      *
      * @throws WithdrawalRequiresAllowlistException canWithdraw is true with no allowlist
-     * @throws com.exchange.user.mfa.exception.InvalidMfaCodeException the step-up code is
+     * @throws com.exchange.user.mfa.exception.MfaExceptions.InvalidMfaCodeException the step-up code is
      *         wrong, expired, or already spent -- including reusing the code from a key
      *         created seconds earlier, since a TOTP step is consumed on use
      */

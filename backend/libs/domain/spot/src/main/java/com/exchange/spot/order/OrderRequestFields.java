@@ -1,10 +1,10 @@
 package com.exchange.spot.order;
 
 import com.exchange.contracts.spot.v1.SelfTradePreventionMode;
-import com.exchange.spot.order.exception.InvalidOrderTypeException;
-import com.exchange.spot.order.exception.InvalidSelfTradePreventionModeException;
-import com.exchange.spot.order.exception.InvalidSideException;
-import com.exchange.spot.order.exception.InvalidTimeInForceException;
+import com.exchange.spot.order.exception.OrderExceptions.InvalidOrderTypeException;
+import com.exchange.spot.order.exception.OrderExceptions.InvalidSelfTradePreventionModeException;
+import com.exchange.spot.order.exception.OrderExceptions.InvalidSideException;
+import com.exchange.spot.order.exception.OrderExceptions.InvalidTimeInForceException;
 import java.util.Map;
 
 /**

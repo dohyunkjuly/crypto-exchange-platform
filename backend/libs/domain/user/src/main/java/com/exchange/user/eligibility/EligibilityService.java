@@ -1,10 +1,10 @@
 package com.exchange.user.eligibility;
 
-import com.exchange.user.eligibility.exception.EmailNotVerifiedException;
-import com.exchange.user.eligibility.exception.KycRequiredException;
-import com.exchange.user.eligibility.exception.MfaRequiredException;
-import com.exchange.user.eligibility.exception.TradingSuspendedException;
-import com.exchange.user.eligibility.exception.AccountFrozenException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.EmailNotVerifiedException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.KycRequiredException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.MfaRequiredException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.TradingSuspendedException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.AccountFrozenException;
 import com.exchange.user.identity.User;
 import com.exchange.user.identity.UserStatus;
 import com.exchange.user.identity.UserType;

@@ -2,7 +2,7 @@ package com.exchange.bff.common.security;
 
 import com.exchange.bff.common.errors.BffHttpErrorCode;
 import com.exchange.copy.leader.CopyLeadAccountService;
-import com.exchange.copy.leader.exception.NotALeaderException;
+import com.exchange.copy.leader.exception.LeaderExceptions.NotALeaderException;
 import com.exchange.core.api.exception.ApiException;
 import com.exchange.user.identity.User;
 import com.exchange.user.identity.UserRepository;

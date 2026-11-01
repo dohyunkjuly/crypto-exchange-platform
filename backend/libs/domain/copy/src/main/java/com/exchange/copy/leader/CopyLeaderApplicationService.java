@@ -1,7 +1,7 @@
 package com.exchange.copy.leader;
 
 import com.exchange.copy.settings.CopyQuoteAsset;
-import com.exchange.copy.leader.exception.LeadAmountOutOfRangeException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeadAmountOutOfRangeException;
 import com.exchange.copy.leader.CopyLeader;
 import com.exchange.copy.settings.CopySettings;
 import com.exchange.copy.settings.CopySettingsRepository;
@@ -44,11 +44,11 @@ public class CopyLeaderApplicationService {
     /**
      * @param transferId the client's id for the funding, so a request sent twice funds once
      * @param amount     moved from the customer's own account into the lead account, in the copy asset
-     * @throws com.exchange.user.eligibility.exception.KycRequiredException not verified far enough
-     * @throws com.exchange.user.eligibility.exception.MfaRequiredException no second factor
+     * @throws com.exchange.user.eligibility.exception.EligibilityExceptions.KycRequiredException not verified far enough
+     * @throws com.exchange.user.eligibility.exception.EligibilityExceptions.MfaRequiredException no second factor
      * @throws LeadAmountOutOfRangeException under the lead minimum or over the maximum
-     * @throws com.exchange.copy.leader.exception.AlreadyLeaderException already leading or suspended
-     * @throws com.exchange.copy.leader.exception.DisplayNameTakenException somebody else has that name
+     * @throws com.exchange.copy.leader.exception.LeaderExceptions.AlreadyLeaderException already leading or suspended
+     * @throws com.exchange.copy.leader.exception.LeaderExceptions.DisplayNameTakenException somebody else has that name
      */
     @Transactional
     public CopyLeader apply(Long userId, String displayName, String bio, boolean showPortfolio, UUID transferId,

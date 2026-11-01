@@ -1,11 +1,11 @@
 package com.exchange.copy.order;
 
-import com.exchange.spot.order.exception.EngineUnavailableException;
-import com.exchange.spot.order.exception.MarketOrdersDisabledException;
-import com.exchange.spot.order.exception.MarketUnavailableException;
-import com.exchange.spot.order.exception.OrderLimitExceededException;
-import com.exchange.spot.order.exception.SymbolNotTradingException;
-import com.exchange.wallet.balance.exception.InsufficientBalanceException;
+import com.exchange.spot.order.exception.OrderExceptions.EngineUnavailableException;
+import com.exchange.spot.order.exception.OrderExceptions.MarketOrdersDisabledException;
+import com.exchange.spot.order.exception.OrderExceptions.MarketUnavailableException;
+import com.exchange.spot.order.exception.OrderExceptions.OrderLimitExceededException;
+import com.exchange.spot.order.exception.OrderExceptions.SymbolNotTradingException;
+import com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException;
 import java.util.Optional;
 
 /** Why a copy failed or was skipped: what the follower's page says, and what a leader's success rate counts. */

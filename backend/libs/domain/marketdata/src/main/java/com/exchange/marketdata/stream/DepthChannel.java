@@ -6,7 +6,7 @@ import com.exchange.marketdata.depth.Depth;
 import com.exchange.marketdata.depth.DepthBook;
 import com.exchange.marketdata.depth.DepthGroupings;
 import com.exchange.marketdata.depth.DepthService;
-import com.exchange.marketdata.stream.exception.InvalidGroupingException;
+import com.exchange.marketdata.stream.exception.StreamExceptions.InvalidGroupingException;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Component;

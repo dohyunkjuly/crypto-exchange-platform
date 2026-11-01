@@ -1,6 +1,6 @@
 package com.exchange.user.apikey;
 
-import com.exchange.user.apikey.exception.ApiKeyNotFoundException;
+import com.exchange.user.apikey.exception.ApiKeyExceptions.ApiKeyNotFoundException;
 import com.exchange.user.audit.AuthEventType;
 import com.exchange.user.audit.AuthOutcome;
 import com.exchange.user.audit.UserAuthEvent;

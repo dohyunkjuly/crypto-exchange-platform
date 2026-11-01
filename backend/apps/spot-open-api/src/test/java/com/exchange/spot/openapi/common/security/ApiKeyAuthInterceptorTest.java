@@ -17,7 +17,7 @@ import com.exchange.user.apikey.ApiKeyRevokedReason;
 import com.exchange.user.apikey.ApiKeyService;
 import com.exchange.user.apikey.UserApiKey;
 import com.exchange.user.eligibility.EligibilityService;
-import com.exchange.user.eligibility.exception.KycRequiredException;
+import com.exchange.user.eligibility.exception.EligibilityExceptions.KycRequiredException;
 import com.exchange.user.identity.User;
 import com.exchange.user.identity.UserRepository;
 import com.exchange.user.kyc.KycLevel;

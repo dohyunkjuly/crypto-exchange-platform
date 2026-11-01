@@ -2,7 +2,7 @@ package com.exchange.bff.kyc;
 
 import com.exchange.bff.common.errors.BffHttpErrorCode;
 import com.exchange.core.api.response.HttpApiResponse;
-import com.exchange.user.kyc.exception.KycAlreadyVerifiedException;
+import com.exchange.user.kyc.exception.KycExceptions.KycAlreadyVerifiedException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

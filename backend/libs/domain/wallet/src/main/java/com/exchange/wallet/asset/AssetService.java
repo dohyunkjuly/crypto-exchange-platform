@@ -1,6 +1,6 @@
 package com.exchange.wallet.asset;
 
-import com.exchange.wallet.asset.exception.AssetNotFoundException;
+import com.exchange.wallet.asset.exception.AssetExceptions.AssetNotFoundException;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.stereotype.Service;

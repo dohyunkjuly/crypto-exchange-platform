@@ -2,7 +2,7 @@ package com.exchange.admin.bff.users;
 
 import com.exchange.admin.bff.common.errors.AdminErrorCode;
 import com.exchange.core.api.response.HttpApiResponse;
-import com.exchange.user.apikey.exception.ApiKeyNotFoundException;
+import com.exchange.user.apikey.exception.ApiKeyExceptions.ApiKeyNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

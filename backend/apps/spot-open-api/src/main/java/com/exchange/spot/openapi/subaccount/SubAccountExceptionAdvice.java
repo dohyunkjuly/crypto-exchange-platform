@@ -2,10 +2,10 @@ package com.exchange.spot.openapi.subaccount;
 
 import com.exchange.core.api.response.HttpApiResponse;
 import com.exchange.spot.openapi.common.errors.OpenApiErrorCode;
-import com.exchange.user.subaccount.exception.NotAMasterAccountException;
-import com.exchange.user.subaccount.exception.SubAccountFrozenException;
-import com.exchange.user.subaccount.exception.SubAccountLimitReachedException;
-import com.exchange.user.subaccount.exception.SubAccountNotFoundException;
+import com.exchange.user.subaccount.exception.SubAccountExceptions.NotAMasterAccountException;
+import com.exchange.user.subaccount.exception.SubAccountExceptions.SubAccountFrozenException;
+import com.exchange.user.subaccount.exception.SubAccountExceptions.SubAccountLimitReachedException;
+import com.exchange.user.subaccount.exception.SubAccountExceptions.SubAccountNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

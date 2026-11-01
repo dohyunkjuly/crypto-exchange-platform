@@ -2,10 +2,10 @@ package com.exchange.bff.mfa;
 
 import com.exchange.bff.common.errors.BffHttpErrorCode;
 import com.exchange.core.api.response.HttpApiResponse;
-import com.exchange.user.mfa.exception.InvalidMfaCodeException;
-import com.exchange.user.mfa.exception.MfaAlreadyEnabledException;
-import com.exchange.user.mfa.exception.MfaEnrolmentNotStartedException;
-import com.exchange.user.mfa.exception.MfaNotEnabledException;
+import com.exchange.user.mfa.exception.MfaExceptions.InvalidMfaCodeException;
+import com.exchange.user.mfa.exception.MfaExceptions.MfaAlreadyEnabledException;
+import com.exchange.user.mfa.exception.MfaExceptions.MfaEnrolmentNotStartedException;
+import com.exchange.user.mfa.exception.MfaExceptions.MfaNotEnabledException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

@@ -1,7 +1,7 @@
 package com.exchange.spot.symbol;
 
 import com.exchange.common.kafka.Topics;
-import com.exchange.spot.order.exception.MarketUnavailableException;
+import com.exchange.spot.order.exception.OrderExceptions.MarketUnavailableException;
 import java.util.List;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;

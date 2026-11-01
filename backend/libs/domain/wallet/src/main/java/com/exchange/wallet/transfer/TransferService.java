@@ -27,7 +27,7 @@ public class TransferService {
 
     /**
      * @param id the transfer's id, chosen by the caller so a retry is the same transfer
-     * @throws com.exchange.wallet.balance.exception.InsufficientBalanceException the sender's available is short
+     * @throws com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException the sender's available is short
      */
     @Transactional
     public WalletTransfer transfer(UUID id, Long fromUserId, Long toUserId, Long assetId, long amount,

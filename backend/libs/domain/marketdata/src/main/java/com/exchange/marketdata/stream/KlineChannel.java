@@ -4,7 +4,7 @@ import com.exchange.marketdata.candle.Candle;
 import com.exchange.marketdata.candle.CandleInterval;
 import com.exchange.marketdata.candle.CandleService;
 import com.exchange.marketdata.candle.Market;
-import com.exchange.marketdata.stream.exception.InvalidIntervalException;
+import com.exchange.marketdata.stream.exception.StreamExceptions.InvalidIntervalException;
 import java.time.Clock;
 import java.util.List;
 import java.util.Optional;

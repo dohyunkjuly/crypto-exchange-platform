@@ -3,15 +3,15 @@ package com.exchange.copy.follow;
 import com.exchange.copy.settings.CopyQuoteAsset;
 import com.exchange.copy.share.CopyProfitShareService;
 import com.exchange.copy.share.ShareTrigger;
-import com.exchange.copy.follow.exception.AlreadyFollowingException;
-import com.exchange.copy.follow.exception.CopyAmountTooSmallException;
-import com.exchange.copy.follow.exception.CopyBalanceBelowMinimumException;
-import com.exchange.copy.follow.exception.CopyLimitReachedException;
-import com.exchange.copy.follow.exception.FollowNotActiveException;
-import com.exchange.copy.follow.exception.FollowNotFoundException;
-import com.exchange.copy.leader.exception.LeaderNotAcceptingException;
-import com.exchange.copy.leader.exception.LeaderNotFoundException;
-import com.exchange.copy.follow.exception.SelfFollowException;
+import com.exchange.copy.follow.exception.FollowExceptions.AlreadyFollowingException;
+import com.exchange.copy.follow.exception.FollowExceptions.CopyAmountTooSmallException;
+import com.exchange.copy.follow.exception.FollowExceptions.CopyBalanceBelowMinimumException;
+import com.exchange.copy.follow.exception.FollowExceptions.CopyLimitReachedException;
+import com.exchange.copy.follow.exception.FollowExceptions.FollowNotActiveException;
+import com.exchange.copy.follow.exception.FollowExceptions.FollowNotFoundException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeaderNotAcceptingException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeaderNotFoundException;
+import com.exchange.copy.follow.exception.FollowExceptions.SelfFollowException;
 import com.exchange.copy.follow.CloseReason;
 import com.exchange.copy.follow.CopyFollow;
 import com.exchange.copy.follow.CopyFollowRepository;
@@ -87,7 +87,7 @@ public class CopyFollowService {
      * @throws AlreadyFollowingException an open copy account for this leader exists
      * @throws CopyLimitReachedException too many open copy accounts
      * @throws CopyAmountTooSmallException under the mode's minimum, or an amount per order it cannot cover
-     * @throws com.exchange.wallet.balance.exception.InsufficientBalanceException the customer has less than {@code amount}
+     * @throws com.exchange.wallet.balance.exception.BalanceExceptions.InsufficientBalanceException the customer has less than {@code amount}
      */
     @Transactional
     public CopyFollow follow(UUID followId, Long userId, UUID leaderId, CopyMode mode, Long amountPerOrder,

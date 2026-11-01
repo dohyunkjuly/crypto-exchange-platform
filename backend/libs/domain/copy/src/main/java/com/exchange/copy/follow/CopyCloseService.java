@@ -5,7 +5,7 @@ import com.exchange.copy.share.CopyProfitShareService;
 import com.exchange.copy.share.ShareTrigger;
 import com.exchange.common.id.Ulid;
 import com.exchange.common.money.Money;
-import com.exchange.copy.leader.exception.LeadAccountNotFlatException;
+import com.exchange.copy.leader.exception.LeaderExceptions.LeadAccountNotFlatException;
 import com.exchange.copy.follow.CloseReason;
 import com.exchange.copy.follow.CopyFollow;
 import com.exchange.copy.follow.CopyFollowRepository;

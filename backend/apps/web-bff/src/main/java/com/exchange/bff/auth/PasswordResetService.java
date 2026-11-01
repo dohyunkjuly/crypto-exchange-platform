@@ -131,7 +131,7 @@ public class PasswordResetService {
      *
      * @throws ApiException {@code INVALID_RESET_CODE} for anything wrong with the code --
      *         unknown, expired, spent, exhausted, or for a different address
-     * @throws com.exchange.user.mfa.exception.InvalidMfaCodeException the second factor
+     * @throws com.exchange.user.mfa.exception.MfaExceptions.InvalidMfaCodeException the second factor
      *         did not check out
      */
     @Transactional(noRollbackFor = ApiException.class)
