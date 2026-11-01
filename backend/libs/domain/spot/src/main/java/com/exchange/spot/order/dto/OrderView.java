@@ -8,12 +8,15 @@ import com.exchange.spot.order.SpotOrder;
 import java.time.Instant;
 
 /**
- * One order as a client sees it, open or closed -- the row on the private socket's acceptance
- * frame, shared by web-bff and spot-open-api because the frame is. Each app's REST view has the
- * same fields; this is the one the shared consumer builds. Money is a decimal string; a
- * quote-sized order has no base {@code quantity} and a base-sized one no {@code quoteOrderQty}.
+ * One order as a client sees it, open or closed: the row on web-bff's and spot-open-api's REST
+ * endpoints and on the private socket's acceptance frame, one record so the three cannot
+ * drift -- an open-orders list mixes rows from REST and the socket and must not be able to
+ * tell them apart. Money is a decimal string, never a JSON number; nullable money stays null
+ * rather than becoming "0", because a MARKET order has no price and a quote-sized order no base
+ * {@code quantity}. A trailing order's {@code stopPrice} is its activation price, never the
+ * live stop: the engine ratchets that in memory and nothing persists it.
  */
-public record OrderSnapshot(String orderId,
+public record OrderView(String orderId,
                         String clientOrderId,
                         String symbol,
                         String side,
@@ -35,9 +38,9 @@ public record OrderSnapshot(String orderId,
                         Instant updatedAt,
                         boolean amendPending) {
 
-    public static OrderSnapshot of(OrderDetail detail) {
+    public static OrderView of(OrderDetail detail) {
         SpotOrder order = detail.order();
-        return new OrderSnapshot(order.getId().toString(),
+        return new OrderView(order.getId().toString(),
                 order.getClientOrderId(),
                 detail.symbol(),
                 order.getSide().name(),
@@ -68,14 +71,14 @@ public record OrderSnapshot(String orderId,
      * from both and must not be able to tell them apart. Nothing has filled yet -- the caller
      * only builds this when the event is the whole order (see {@code UserWsConsumer}).
      */
-    public static OrderSnapshot accepted(String orderId, String symbol, OrderAccepted accepted,
+    public static OrderView accepted(String orderId, String symbol, OrderAccepted accepted,
                                      String status, Instant at) {
         OrderType type = OrderType.valueOf(accepted.getOrderType().name().replace("ORDER_TYPE_", ""));
         Side side = Side.valueOf(accepted.getSide().name().replace("SIDE_", ""));
         var tif = accepted.getTimeInForce();
         boolean quoteSized = accepted.hasQuoteOrderQty();
         String quantity = quoteSized ? null : Money.toDecimal(accepted.getQuantity());
-        return new OrderSnapshot(orderId,
+        return new OrderView(orderId,
                 accepted.hasClientOrderId() ? accepted.getClientOrderId() : null,
                 symbol,
                 side.name(),

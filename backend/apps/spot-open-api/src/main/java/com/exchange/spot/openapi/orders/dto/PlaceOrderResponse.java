@@ -1,5 +1,6 @@
 package com.exchange.spot.openapi.orders.dto;
 
+import com.exchange.spot.order.dto.OrderView;
 import java.time.Instant;
 
 /** 202: funds locked and the command durable; matching is still to come. Enough to log the

@@ -3,11 +3,13 @@ package com.exchange.spot.order.dto;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.exchange.contracts.spot.v1.OrderAccepted;
+import com.exchange.spot.order.OrderType;
+import com.exchange.spot.order.Side;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 /** The acceptance frame's row reads like the database row would before any fill. */
-class OrderSnapshotTest {
+class OrderViewTest {
 
     private static final long ONE = 100_000_000L;
 
@@ -19,7 +21,7 @@ class OrderSnapshotTest {
                 .setTimeInForce(com.exchange.contracts.spot.v1.TimeInForce.TIME_IN_FORCE_GTC)
                 .setPrice(59_000 * ONE).setStopPrice(60_000 * ONE)
                 .setQuantity(ONE / 2).setPendingTrigger(true).build();
-        OrderSnapshot view = OrderSnapshot.accepted("id", "BTCUSDT", accepted, "PENDING_TRIGGER", Instant.EPOCH);
+        OrderView view = OrderView.accepted("id", "BTCUSDT", accepted, "PENDING_TRIGGER", Instant.EPOCH);
         assertThat(view.orderType()).isEqualTo("STOP_LOSS_LIMIT");
         assertThat(view.side()).isEqualTo("SELL");
         assertThat(view.timeInForce()).isEqualTo("GTC");
@@ -32,7 +34,7 @@ class OrderSnapshotTest {
         assertThat(view.trailingDeltaBps()).isNull();
     }
 
-    /** Same rule as {@link OrderSnapshot#of}: a quote-sized order has no base quantity to report. */
+    /** Same rule as {@link OrderView#of}: a quote-sized order has no base quantity to report. */
     @Test
     void aQuoteSizedStopReportsItsBudgetNotAQuantity() {
         OrderAccepted accepted = OrderAccepted.newBuilder()
@@ -40,12 +42,36 @@ class OrderSnapshotTest {
                 .setOrderType(com.exchange.contracts.spot.v1.OrderType.ORDER_TYPE_STOP_LOSS)
                 .setStopPrice(70_000 * ONE).setQuantity(500 * ONE).setQuoteOrderQty(500 * ONE)
                 .setTrailingDeltaBps(150).setPendingTrigger(true).build();
-        OrderSnapshot view = OrderSnapshot.accepted("id", "BTCUSDT", accepted, "PENDING_TRIGGER", Instant.EPOCH);
+        OrderView view = OrderView.accepted("id", "BTCUSDT", accepted, "PENDING_TRIGGER", Instant.EPOCH);
         assertThat(view.quantity()).isNull();
         assertThat(view.remainingQuantity()).isNull();
         assertThat(view.quoteOrderQty()).isEqualTo("500");
         assertThat(view.trailingDeltaBps()).isEqualTo(150);
         assertThat(view.price()).isNull();
         assertThat(view.timeInForce()).isNull();
+    }
+
+    /** The direction flips on side as well as type, so one wrong case would read "≥" for "≤". */
+    @Test
+    void aStopLossGuardsAgainstTheMoveThatHurtsThePosition() {
+        assertThat(OrderView.triggerDirection(OrderType.STOP_LOSS, Side.SELL)).isEqualTo("FALL");
+        assertThat(OrderView.triggerDirection(OrderType.STOP_LOSS_LIMIT, Side.SELL)).isEqualTo("FALL");
+        assertThat(OrderView.triggerDirection(OrderType.STOP_LOSS, Side.BUY)).isEqualTo("RISE");
+        assertThat(OrderView.triggerDirection(OrderType.STOP_LOSS_LIMIT, Side.BUY)).isEqualTo("RISE");
+    }
+
+    @Test
+    void aTakeProfitWaitsForTheMoveThatHelpsIt() {
+        assertThat(OrderView.triggerDirection(OrderType.TAKE_PROFIT, Side.SELL)).isEqualTo("RISE");
+        assertThat(OrderView.triggerDirection(OrderType.TAKE_PROFIT_LIMIT, Side.SELL)).isEqualTo("RISE");
+        assertThat(OrderView.triggerDirection(OrderType.TAKE_PROFIT, Side.BUY)).isEqualTo("FALL");
+        assertThat(OrderView.triggerDirection(OrderType.TAKE_PROFIT_LIMIT, Side.BUY)).isEqualTo("FALL");
+    }
+
+    @Test
+    void anUntriggeredTypeHasNoDirection() {
+        for (OrderType type : new OrderType[] {OrderType.LIMIT, OrderType.MARKET, OrderType.LIMIT_MAKER}) {
+            assertThat(OrderView.triggerDirection(type, Side.BUY)).isNull();
+        }
     }
 }

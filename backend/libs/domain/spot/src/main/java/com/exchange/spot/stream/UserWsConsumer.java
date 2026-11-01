@@ -1,6 +1,6 @@
 package com.exchange.spot.stream;
 
-import com.exchange.spot.order.dto.OrderSnapshot;
+import com.exchange.spot.order.dto.OrderView;
 import com.exchange.marketdata.stream.WsMessage;
 import com.exchange.common.kafka.Topics;
 import com.exchange.common.id.Ulid;
@@ -93,7 +93,7 @@ public class UserWsConsumer {
                         null, null, null, null, null, null,
                         accepted.hasClientOrderId() ? accepted.getClientOrderId() : null, at,
                         describesWholeOrder(accepted)
-                                ? OrderSnapshot.accepted(orderId, event.getSymbol(), accepted, status, at)
+                                ? OrderView.accepted(orderId, event.getSymbol(), accepted, status, at)
                                 : null));
             }
             case ORDER_REJECTED -> {

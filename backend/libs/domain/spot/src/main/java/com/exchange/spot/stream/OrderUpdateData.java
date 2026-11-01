@@ -1,6 +1,6 @@
 package com.exchange.spot.stream;
 
-import com.exchange.spot.order.dto.OrderSnapshot;
+import com.exchange.spot.order.dto.OrderView;
 import com.exchange.common.money.Money;
 import java.time.Instant;
 
@@ -44,14 +44,14 @@ public record OrderUpdateData(String orderId,
                               String cancelReason,
                               String clientOrderId,
                               Instant time,
-                              OrderSnapshot order,
+                              OrderView order,
                               OrderAmendData amend) {
 
     /** Every frame but an amend's. */
     public OrderUpdateData(String orderId, String symbol, String status, String executedQuantity,
                            String remainingQuantity, String lastFillPrice, String lastFillQuantity,
                            String rejectReason, String cancelReason, String clientOrderId,
-                           Instant time, OrderSnapshot order) {
+                           Instant time, OrderView order) {
         this(orderId, symbol, status, executedQuantity, remainingQuantity, lastFillPrice,
                 lastFillQuantity, rejectReason, cancelReason, clientOrderId, time, order, null);
     }
