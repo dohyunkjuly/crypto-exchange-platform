@@ -8,6 +8,9 @@ import { useSession } from "@/features/auth/session";
 import { useFavoritesOf } from "@/lib/favorites";
 import { Menu, MenuItem } from "@/components/ui/Menu";
 import { useT } from "@/lib/i18n";
+import { price, signed } from "@/lib/format";
+import { sum } from "@/lib/money";
+import { compareFigures, tone } from "./copyMath";
 import { LocaleLink } from "@/lib/i18n/LocaleLink";
 import { fetchFollows, fetchLead, fetchLeaders, type Leader, type Terms } from "./api";
 import { Faq } from "./Faq";
@@ -23,11 +26,10 @@ type Order = "return" | "pnl" | "maxDrawdown" | "fundsCopying" | "followers";
 const PER_PAGE = 12;
 const ORDERS: Order[] = ["return", "pnl", "maxDrawdown", "fundsCopying", "followers"];
 /** Best first: the smallest drawdown, the largest of everything else. A leader with no figures goes last, not between. */
-function rank(l: Leader, period: Period, by: Order): number {
-  if (by === "followers") return l.followers;
-  const v = by === "fundsCopying" ? l.stats?.fundsCopying : l.stats?.[period][by];
-  if (v === null || v === undefined) return -Infinity;
-  return by === "maxDrawdown" ? -Number(v) : Number(v);
+function byRank(period: Period, by: Order) {
+  if (by === "followers") return (a: Leader, b: Leader) => b.followers - a.followers;
+  const figure = (l: Leader) => (by === "fundsCopying" ? l.stats?.fundsCopying : l.stats?.[period][by]);
+  return (a: Leader, b: Leader) => compareFigures(figure(a), figure(b), by === "maxDrawdown" ? "maxDrawdown" : "other");
 }
 const button = "inline-flex h-10 items-center justify-center rounded-lg px-4 text-base font-medium";
 const outlined = `${button} border border-border hover:border-border-strong`;
@@ -51,7 +53,7 @@ export function Leaders() {
   const [period, setPeriod] = useState<Period>("days30");
   const [order, setOrder] = useState<Order>("return");
   // Sorted and searched here, over the whole list the server sent, so the pages are over that.
-  const sorted = [...(leaders.data?.leaders ?? [])].sort((a, b) => rank(b, period, order) - rank(a, period, order));
+  const sorted = [...(leaders.data?.leaders ?? [])].sort(byRank(period, order));
   const typed = name.trim().toLowerCase();
   const shown = sorted.filter((l) => (tab === "all" || favorites.has(l.id)) && (!typed || l.displayName.toLowerCase().includes(typed)));
   const page = usePage(shown, PER_PAGE);
@@ -61,7 +63,7 @@ export function Leaders() {
 
   const { terms } = leaders.data;
   // What the copy accounts hold, each coin valued at its market's last trade: the server's number.
-  const copying = follows.data?.filter((f) => f.status === "ACTIVE").reduce((sum, f) => sum + Number(f.value), 0);
+  const copying = follows.data && sum(follows.data.filter((f) => f.status === "ACTIVE").map((f) => f.value));
 
   return (
     <div className="flex flex-col gap-6">
@@ -74,7 +76,7 @@ export function Leaders() {
         <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-border p-5">
           <div className="flex flex-col gap-1">
             <span className="text-sm text-muted">{t("copy.copyingBalance", { asset: terms.quoteAsset })}</span>
-            <span className="num text-2xl font-semibold">{copying === undefined ? "—" : copying.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+            <span className="num text-2xl font-semibold">{copying === undefined ? "—" : price(copying, 2)}</span>
           </div>
           <LocaleLink href="/copy/mine" className={outlined}>{t("copy.copyOverview")}</LocaleLink>
         </div>
@@ -128,7 +130,7 @@ function LeaderCard({ leader: l, terms, period, signedIn, starred, onStar }: {
   const s = l.stats;
   const w = s?.[period];
   const pnl = w?.pnl ?? "0";
-  const pnlTone = Number(pnl) === 0 ? "text-text" : Number(pnl) > 0 ? "text-up" : "text-down";
+  const pnlTone = tone(pnl) || "text-text";
   const row = (label: string, value: React.ReactNode) => (
     <div className="flex items-center justify-between text-base"><span className="text-muted">{label}</span><span className="num">{value}</span></div>
   );
@@ -150,14 +152,14 @@ function LeaderCard({ leader: l, terms, period, signedIn, starred, onStar }: {
       <div className="flex items-end justify-between gap-3">
         <div className="flex flex-col">
           <span className="text-sm text-muted">{t("copy.pnlOver", { days: t(`copyPeriod.${period}`), asset: terms.quoteAsset })}</span>
-          <span className={`num text-2xl font-semibold ${pnlTone}`}>{`${Number(pnl) > 0 ? "+" : ""}${Number(pnl).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</span>
+          <span className={`num text-2xl font-semibold ${pnlTone}`}>{signed(pnl, 2)}</span>
           <span className="text-sm text-muted">{t("copy.returnShort")} <Percent value={w?.return ?? null} signed /></span>
         </div>
         <Sparkline values={(s?.series ?? []).map((p) => p.value)} />
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {row(t("copy.fundsCopying"), `${Number(s?.fundsCopying ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${terms.quoteAsset}`)}
+        {row(t("copy.fundsCopying"), `${price(s?.fundsCopying ?? "0", 2)} ${terms.quoteAsset}`)}
         {row(t("copy.mddOver", { days: t(`copyPeriod.${period}`) }), <Percent value={w?.maxDrawdown ?? null} />)}
       </div>
 

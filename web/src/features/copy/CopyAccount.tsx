@@ -12,6 +12,9 @@ import { Pager } from "@/features/my/shared/Pager";
 import { LocaleLink } from "@/lib/i18n/LocaleLink";
 import { fetchBalances } from "@/features/my/shared/api";
 import { useLocale, useT } from "@/lib/i18n";
+import { grouped } from "@/lib/format";
+import { positive, sanitizeAmount } from "@/lib/money";
+import { exceeds, tone } from "./copyMath";
 import { addFunds, fetchCopies, fetchFollow, fetchLeaders, fetchShares, PER_PAGE, removeFunds, stopCopying, type Follow } from "./api";
 import { resultTone, statusTone } from "./status";
 
@@ -47,7 +50,6 @@ export function CopyAccount({ id }: { id: string }) {
   const { follow } = detail.data;
   const quoteAsset = terms?.quoteAsset ?? "";
   const active = follow.status === "ACTIVE";
-  const realized = Number(follow.realizedProfit);
   return (
     <div className="flex flex-col gap-6">
       <BackLink href="/copy/mine" label={t("copy.myCopies")} />
@@ -82,7 +84,7 @@ export function CopyAccount({ id }: { id: string }) {
 
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-border p-4"><dt className="text-sm text-muted">{t("copy.realizedProfit")}</dt>
-          <dd className={`num text-xl font-semibold ${realized > 0 ? "text-up" : realized < 0 ? "text-down" : ""}`}>{follow.realizedProfit} {quoteAsset}</dd></div>
+          <dd className={`num text-xl font-semibold ${tone(follow.realizedProfit)}`}>{follow.realizedProfit} {quoteAsset}</dd></div>
         <div className="rounded-lg border border-border p-4"><dt className="text-sm text-muted">{t("copy.sharedProfit")}</dt>
           <dd className="num text-xl font-semibold">{follow.sharedProfit} {quoteAsset}</dd></div>
         <div className="rounded-lg border border-border p-4"><dt className="text-sm text-muted">{t("copy.yourRate")}</dt>
@@ -170,7 +172,7 @@ function Copies({ id }: { id: string }) {
   const rows = useQuery({ queryKey: ["copy-follow-copies", id, page], queryFn: ({ signal }) => fetchCopies(id, page, signal),
     refetchInterval: 5_000, placeholderData: (previous) => previous }).data ?? [];
   const time = (iso: string) => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
-  const num = (v: string | null) => v === null ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 8 });
+  const num = (v: string | null) => v === null ? "—" : grouped(v);
   return (
     <div className="flex flex-col gap-4">
       <div className="overflow-x-auto rounded-lg border border-border">
@@ -222,19 +224,19 @@ function Funds({ follow, direction, onClose, onDone }: { follow: Follow; directi
   const available = direction === "in"
     ? balances.data?.find((b) => b.asset === quote)?.available ?? "0"
     : follow.holdings.find((h) => h.asset === quote)?.available ?? "0";
-  const tooMuch = amount !== "" && Number(amount) > Number(available);
+  const tooMuch = exceeds(amount, available);
   return (
     <Dialog title={t(direction === "in" ? "copy.addFunds" : "copy.takeOut")} onClose={onClose}>
       <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); move.mutate({ id: follow.id, transferId, amount }); }}>
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-muted">{t("copy.amount", { asset: quote })}</span>
           <input className={`${control} num`} inputMode="decimal" pattern="\d*\.?\d*" required autoFocus value={amount}
-                 onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
+                 onChange={(e) => setAmount(sanitizeAmount(e.target.value))} />
           <span className={`num text-sm ${tooMuch ? "text-danger" : "text-dim"}`}>{t("copy.available", { amount: `${available} ${quote}` })}</span>
         </label>
         <FormError error={move.error} />
         <div className="flex gap-2">
-          <Button type="submit" pending={move.isPending} disabled={Number(amount) <= 0 || tooMuch}>{t("common.confirm")}</Button>
+          <Button type="submit" pending={move.isPending} disabled={!positive(amount) || tooMuch}>{t("common.confirm")}</Button>
           <Button type="button" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
         </div>
       </form>

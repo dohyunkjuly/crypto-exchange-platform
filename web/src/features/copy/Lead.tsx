@@ -13,6 +13,8 @@ import { SelectFilter } from "@/features/my/shared/filters";
 import { setTradingAccount } from "@/features/trade/tradingAccount";
 import { BackLink } from "@/features/my/shared/BackLink";
 import { useT } from "@/lib/i18n";
+import { positive, sanitizeAmount } from "@/lib/money";
+import { below, exceeds, withdrawable } from "./copyMath";
 import { LocaleLink } from "@/lib/i18n/LocaleLink";
 import { amount, card, PerformanceCard, ReturnChartCard, row } from "./Figures";
 import { LeadKeys } from "./LeadKeys";
@@ -211,7 +213,7 @@ function Ended({ lead, page, onChange, applying, onApply, onClose }: {
 }) {
   const t = useT();
   const [moving, setMoving] = useState(false);
-  const holdsSomething = lead.holdings.some((h) => Number(h.available) > 0);
+  const holdsSomething = lead.holdings.some((h) => positive(h.available));
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -258,8 +260,8 @@ function Apply({ lead, page, onDone }: { lead: MyLead | null; page: LeadPage; on
   const balances = useQuery({ queryKey: ["balances"], queryFn: ({ signal }) => fetchBalances(signal) });
   const available = balances.data?.find((b) => b.asset === page.quoteAsset)?.available ?? "0";
   const apply = useMutation({ mutationFn: applyToLead, onSuccess: onDone });
-  const tooLittle = amount !== "" && Number(amount) < Number(page.minBalance);
-  const tooMuch = amount !== "" && (Number(amount) > Number(page.maxBalance) || Number(amount) > Number(available));
+  const tooLittle = below(amount, page.minBalance);
+  const tooMuch = exceeds(amount, page.maxBalance) || exceeds(amount, available);
   return (
     <form className="flex flex-col gap-5"
           onSubmit={(e) => {
@@ -278,7 +280,7 @@ function Apply({ lead, page, onDone }: { lead: MyLead | null; page: LeadPage; on
         <span className="text-sm font-medium text-muted">{t("copy.startWith", { asset: page.quoteAsset })}</span>
         <span className="flex gap-2">
           <input className={`${control} num flex-1`} inputMode="decimal" pattern="\d*\.?\d*" required value={amount}
-                 onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
+                 onChange={(e) => setAmount(sanitizeAmount(e.target.value))} />
           <Button type="button" variant="secondary" onClick={() => setAmount(available)}>{t("subAccounts.max")}</Button>
         </span>
         <span className={`num text-sm ${tooLittle || tooMuch ? "text-danger" : "text-dim"}`}>
@@ -299,7 +301,7 @@ function Apply({ lead, page, onDone }: { lead: MyLead | null; page: LeadPage; on
       </ol>
       <FormError error={apply.error} />
       <Button type="submit" className="self-start" pending={apply.isPending}
-              disabled={name.trim().length < 3 || Number(amount) <= 0 || tooLittle || tooMuch}>
+              disabled={name.trim().length < 3 || !positive(amount) || tooLittle || tooMuch}>
         {t("copy.startLeading")}
       </Button>
     </form>
@@ -316,7 +318,7 @@ function LeadFunds({ page, lead, direction, onClose, onDone }: {
   const t = useT();
   const leading = lead.status === "ACTIVE";
   const balances = useQuery({ queryKey: ["balances"], queryFn: ({ signal }) => fetchBalances(signal), enabled: direction === "in" });
-  const held = lead.holdings.filter((h) => Number(h.available) > 0 && (!leading || h.asset === page.quoteAsset));
+  const held = lead.holdings.filter((h) => positive(h.available) && (!leading || h.asset === page.quoteAsset));
   const [asset, setAsset] = useState(page.quoteAsset);
   const [amount, setAmount] = useState("");
   const [transferId] = useState(() => crypto.randomUUID());
@@ -329,8 +331,8 @@ function LeadFunds({ page, lead, direction, onClose, onDone }: {
     ? balances.data?.find((b) => b.asset === chosen)?.available ?? "0"
     : lead.holdings.find((h) => h.asset === chosen)?.available ?? "0";
   // Leading, the minimum stays behind.
-  const available = direction === "out" && leading ? String(Math.max(0, Number(holds) - Number(page.minBalance))) : holds;
-  const tooMuch = amount !== "" && Number(amount) > Number(available);
+  const available = direction === "out" && leading ? withdrawable(holds, page.minBalance) : holds;
+  const tooMuch = exceeds(amount, available);
   const pending = put.isPending || take.isPending;
   return (
     <Dialog title={t(direction === "in" ? "copy.addFunds" : "copy.takeOut")} onClose={onClose}>
@@ -345,12 +347,12 @@ function LeadFunds({ page, lead, direction, onClose, onDone }: {
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-muted">{t("copy.amount", { asset: chosen })}</span>
           <input className={`${control} num`} inputMode="decimal" pattern="\d*\.?\d*" required autoFocus value={amount}
-                 onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
+                 onChange={(e) => setAmount(sanitizeAmount(e.target.value))} />
           <span className={`num text-sm ${tooMuch ? "text-danger" : "text-dim"}`}>{t("copy.available", { amount: `${available} ${chosen}` })}</span>
         </label>
         <FormError error={put.error ?? take.error} />
         <div className="flex gap-2">
-          <Button type="submit" pending={pending} disabled={Number(amount) <= 0 || tooMuch}>{t("common.confirm")}</Button>
+          <Button type="submit" pending={pending} disabled={!positive(amount) || tooMuch}>{t("common.confirm")}</Button>
           <Button type="button" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
         </div>
       </form>

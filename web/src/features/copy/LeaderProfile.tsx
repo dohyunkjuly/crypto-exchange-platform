@@ -12,6 +12,8 @@ import { useNow } from "@/features/my/account/ApiKeys";
 import { LocaleLink } from "@/lib/i18n/LocaleLink";
 import { localePath } from "@/lib/i18n/locales";
 import { price } from "@/lib/format";
+import { positive, sanitizeAmount, sum } from "@/lib/money";
+import { below, exceeds } from "./copyMath";
 import { Dialog } from "@/components/ui/Dialog";
 import { Empty } from "@/components/ui/Empty";
 import { BackLink } from "@/features/my/shared/BackLink";
@@ -114,7 +116,7 @@ export function LeaderProfile({ id, startCopying = false }: { id: string; startC
 /** What the lead account holds, largest first, with each holding's share of the whole where it can be valued. */
 function Holdings({ portfolio, quoteAsset }: { portfolio: NonNullable<Profile["portfolio"]>; quoteAsset: string }) {
   const t = useT();
-  const total = portfolio.holdings.reduce((sum, h) => sum + Number(h.value ?? 0), 0);
+  const total = sum(portfolio.holdings.map((h) => h.value ?? "0"));
   const page = usePage(portfolio.holdings, PER_PAGE);
   if (portfolio.holdings.length === 0) return <Empty>{t("copy.noHoldings")}</Empty>;
   return (
@@ -131,8 +133,8 @@ function Holdings({ portfolio, quoteAsset }: { portfolio: NonNullable<Profile["p
           <tr key={h.asset} className="border-b border-border last:border-0">
             <td className="py-2.5 font-medium">{h.asset}</td>
             <td className="num py-2.5 text-right">{h.amount}</td>
-            <td className="num py-2.5 text-right">{h.value === null ? "—" : Number(h.value).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-            <td className="num py-2.5 text-right text-muted">{h.value === null || total === 0 ? "—" : `${(Number(h.value) / total * 100).toFixed(1)}%`}</td>
+            <td className="num py-2.5 text-right">{h.value === null ? "—" : price(h.value, 2)}</td>
+            <td className="num py-2.5 text-right text-muted">{h.value === null || !positive(total) ? "—" : `${(Number(h.value) / Number(total) * 100).toFixed(1)}%`}</td>
           </tr>
         ))}
       </tbody>
@@ -217,13 +219,13 @@ function FollowForm({ leader, terms }: { leader: Leader; terms: Terms }) {
 
   const available = balances.data?.find((b) => b.asset === terms.quoteAsset)?.available ?? "0";
   const minimum = mode === "FIXED_RATIO" ? terms.minFixedRatioAmount : terms.minFixedAmount;
-  const tooMuch = amount !== "" && Number(amount) > Number(available);
-  const tooLittle = amount !== "" && Number(amount) < Number(minimum);
+  const tooMuch = exceeds(amount, available);
+  const tooLittle = below(amount, minimum);
   const fixed = mode === "FIXED_AMOUNT";
-  const badPerOrder = fixed && (Number(perOrder) < Number(terms.minFixedAmount) || Number(perOrder) > Number(amount));
+  const badPerOrder = fixed && (!positive(perOrder) || below(perOrder, terms.minFixedAmount) || (positive(amount) && exceeds(perOrder, amount)));
   const slippageBps = Math.round(Number(slippage) * 100);
   const badSlippage = slippage === "" || !(slippageBps >= 10 && slippageBps <= 500);
-  const number = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => set(e.target.value.replace(/[^\d.]/g, ""));
+  const number = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => set(sanitizeAmount(e.target.value));
 
   return (
     <form className="flex flex-col gap-5"
@@ -274,7 +276,7 @@ function FollowForm({ leader, terms }: { leader: Leader; terms: Terms }) {
 
       <FormError error={start.error} />
       <Button type="submit" className="self-start" pending={start.isPending}
-              disabled={Number(amount) <= 0 || tooMuch || tooLittle || badPerOrder || badSlippage}>
+              disabled={!positive(amount) || tooMuch || tooLittle || badPerOrder || badSlippage}>
         {t("copy.start")}
       </Button>
     </form>

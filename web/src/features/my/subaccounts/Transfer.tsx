@@ -9,6 +9,8 @@ import { useSessionQuery } from "@/features/auth/session";
 import { useLocale, useT } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/locales";
 import { price } from "@/lib/format";
+import { positive, sanitizeAmount } from "@/lib/money";
+import { exceeds } from "@/features/copy/copyMath";
 import { fetchAssets, fetchBalances, fetchSubAccountBalances, fetchSubAccounts, transfer } from "../shared/api";
 import { BackLink } from "../shared/BackLink";
 import { SelectFilter } from "../shared/filters";
@@ -50,7 +52,7 @@ export function Transfer() {
   });
   // Only what the sender has. A select of every listed asset is a list of things the transfer
   // would refuse, and "Max: 0" beside them.
-  const holdings = (balances.data ?? []).filter((b) => Number(b.available) > 0);
+  const holdings = (balances.data ?? []).filter((b) => positive(b.available));
   const held = holdings.some((b) => b.asset === asset) ? asset : (holdings[0]?.asset ?? "");
   const available = holdings.find((b) => b.asset === held)?.available ?? "0";
   const decimals = assets.data?.find((a) => a.symbol === held)?.displayDecimals ?? 8;
@@ -71,7 +73,7 @@ export function Transfer() {
       queryClient.invalidateQueries({ queryKey: ["transfers"] });
     },
   });
-  const tooMuch = amount !== "" && Number(amount) > Number(available);
+  const tooMuch = exceeds(amount, available);
 
   if (!me || subs.isPending) return <p className="text-base text-dim" aria-busy>{t("common.loading")}</p>;
 
@@ -104,7 +106,7 @@ export function Transfer() {
             <span className="flex gap-2">
               <input className={`${control} num flex-1 disabled:cursor-not-allowed disabled:text-dim`} inputMode="decimal"
                      pattern="\d*\.?\d*" value={amount} required disabled={holdings.length === 0}
-                     onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
+                     onChange={(e) => setAmount(sanitizeAmount(e.target.value))} />
               <Button type="button" variant="secondary" disabled={holdings.length === 0} onClick={() => setAmount(available)}>{t("subAccounts.max")}</Button>
             </span>
             <span className={`num text-sm ${tooMuch ? "text-danger" : "text-dim"}`}>
@@ -114,7 +116,7 @@ export function Transfer() {
           </label>
           <FormError error={send.error} />
           <div className="flex gap-2">
-            <Button type="submit" pending={send.isPending} disabled={!toId || !held || tooMuch || Number(amount) <= 0}>{t("subAccounts.transfer")}</Button>
+            <Button type="submit" pending={send.isPending} disabled={!toId || !held || tooMuch || !positive(amount)}>{t("subAccounts.transfer")}</Button>
             <Button type="button" variant="ghost" onClick={() => router.replace(localePath(locale, "/my/sub-accounts"))}>{t("common.cancel")}</Button>
           </div>
         </form>

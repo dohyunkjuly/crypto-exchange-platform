@@ -1,5 +1,5 @@
 import type { MarketSymbol } from "@/features/markets/api";
-import { compare, isValidDecimal, multiply, roundToStep } from "@/lib/money";
+import { compare, multiply, positive, roundToStep } from "@/lib/money";
 import type { Order } from "../shared/api";
 
 export type AmendField = "price" | "stopPrice" | "size";
@@ -25,8 +25,6 @@ export const isQuoteSized = (o: Pick<Order, "quoteOrderQty">) => o.quoteOrderQty
 export const draftOf = (o: Order): AmendDraft => ({
   price: o.price ?? "", stopPrice: o.stopPrice ?? "", size: o.quoteOrderQty ?? o.quantity ?? "",
 });
-
-const positive = (v: string) => isValidDecimal(v) && compare(v, "0") > 0;
 
 /** What is wrong with the draft, in the order a trader would fix it. Empty means it can go. */
 export function validateAmend(o: Order, d: AmendDraft, m: MarketSymbol): string[] {

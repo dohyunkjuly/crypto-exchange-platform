@@ -83,10 +83,10 @@ describe("Leaders", () => {
     withClient(<Leaders />);
     const mina = await screen.findByRole("listitem", { name: "Mina" });
     expect(within(mina).getByRole("link", { name: "Copy" })).toHaveAttribute("href", "/en/copy/L1");
-    expect(within(mina).getByText("+1,250.5")).toHaveClass("text-up");
+    expect(within(mina).getByText("+1,250.50")).toHaveClass("text-up");
     expect(within(mina).getByText("+12.34%")).toBeInTheDocument();
     expect(within(mina).getByText("4.2%")).toBeInTheDocument();
-    expect(within(mina).getByText("25,000 USDT")).toBeInTheDocument();
+    expect(within(mina).getByText("25,000.00 USDT")).toBeInTheDocument();
     expect(within(mina).getByText("Followers 12 / 300")).toBeInTheDocument();
     expect(within(mina).getByRole("img", { name: "30-day return, day by day" })).toBeInTheDocument();
     const joon = screen.getByRole("listitem", { name: "Joon" });
@@ -94,9 +94,9 @@ describe("Leaders", () => {
     expect(within(joon).getByText("Full")).toBeInTheDocument();
     // No figures yet: zeros and a flat line, like any other card.
     expect(within(joon).queryByText("—")).toBeNull();
-    expect(within(joon).getByText("0", { selector: "span.text-2xl" })).toBeInTheDocument();
+    expect(within(joon).getByText("0.00", { selector: "span.text-2xl" })).toBeInTheDocument();
     expect(within(joon).getAllByText("0.00%")).toHaveLength(2);   // return and max drawdown
-    expect(within(joon).getByText("0 USDT")).toBeInTheDocument();
+    expect(within(joon).getByText("0.00 USDT")).toBeInTheDocument();
     expect(within(joon).getByRole("img", { name: "30-day return, day by day" })).toBeInTheDocument();
     expect(screen.getAllByRole("listitem").map((c) => c.getAttribute("aria-label"))).toEqual(["Mina", "Joon"]);
   });
@@ -104,7 +104,7 @@ describe("Leaders", () => {
   it("a signed-in customer sees what they have copying and the way to their copy accounts; a visitor only the way to lead", async () => {
     withClient(<Leaders />);
     expect(await screen.findByText("Copying (USDT value)")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("1,000")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("1,000.00")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Copy overview" })).toHaveAttribute("href", "/en/copy/mine");
     expect(screen.getByRole("link", { name: "Be a lead trader" })).toHaveAttribute("href", "/en/copy/lead");
 
@@ -155,7 +155,7 @@ describe("Leaders", () => {
     expect(names()).toEqual(["Joon", "Mina"]);                      // 9% before 1.2% over the week
     expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("7D");
     expect(within(screen.getByRole("listitem", { name: "Mina" })).getByText("7D PNL (USDT)")).toBeInTheDocument();
-    expect(within(screen.getByRole("listitem", { name: "Mina" })).getByText("+80")).toBeInTheDocument();
+    expect(within(screen.getByRole("listitem", { name: "Mina" })).getByText("+80.00")).toBeInTheDocument();
 
     await user.type(screen.getByRole("textbox", { name: "Search by name" }), "mi");
     expect(names()).toEqual(["Mina"]);
@@ -206,7 +206,7 @@ describe("Leader profile", () => {
     const performance = screen.getByRole("region", { name: "Performance" });
     // The leader's own rate (15%), not the exchange's (10% in TERMS).
     expect(within(performance).getByText("Profit share").nextElementSibling).toHaveTextContent("15%");
-    expect(within(performance).getByText("Leading balance").nextElementSibling).toHaveTextContent("12,500.5 USDT");
+    expect(within(performance).getByText("Leading balance").nextElementSibling).toHaveTextContent("12,500.50 USDT");
     expect(within(performance).queryByText("Last trade")).toBeNull();
     expect(screen.queryByRole("region", { name: "Overview" })).toBeNull();
     expect(screen.queryByText("Minimum to follow, fixed ratio")).toBeNull();
@@ -515,8 +515,8 @@ describe("Lead", () => {
     expect(await within(performance).findByText("+12.34%")).toBeInTheDocument();
     expect(api.fetchLeader).toHaveBeenCalledWith("L9", expect.anything());
     // The account's own figures sit in the same card, as on the public profile.
-    expect(within(performance).getByText("Leading balance").nextElementSibling).toHaveTextContent("12,500.5 USDT");
-    expect(within(performance).getByText("Earned in total").nextElementSibling).toHaveTextContent("120.5 USDT");
+    expect(within(performance).getByText("Leading balance").nextElementSibling).toHaveTextContent("12,500.50 USDT");
+    expect(within(performance).getByText("Earned in total").nextElementSibling).toHaveTextContent("120.50 USDT");
     expect(screen.queryByRole("region", { name: "Overview" })).toBeNull();
   });
 

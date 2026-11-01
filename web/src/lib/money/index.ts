@@ -82,6 +82,28 @@ export function isZero(value: string): boolean {
   return parse(value).units === 0n;
 }
 
+/** A well-formed amount above zero: what every "send this much" form needs before it may submit. */
+export function positive(value: string): boolean {
+  return isValidDecimal(value) && parse(value).units > 0n;
+}
+
+/** Exact total of many values; "0" for none. */
+export function sum(values: string[]): string {
+  return values.reduce(add, "0");
+}
+
+/**
+ * What an amount field keeps of what was typed: digits and one decimal point. A second point
+ * is dropped rather than kept, because "1.2.3" is not a number and a form that holds it
+ * cannot tell the difference between "too much" and "not an amount".
+ */
+export function sanitizeAmount(typed: string): string {
+  const digitsAndDots = typed.replace(/[^\d.]/g, "");
+  const dot = digitsAndDots.indexOf(".");
+  if (dot === -1) return digitsAndDots;
+  return digitsAndDots.slice(0, dot + 1) + digitsAndDots.slice(dot + 1).replace(/\./g, "");
+}
+
 export function isNegative(value: string): boolean {
   return parse(value).units < 0n;
 }

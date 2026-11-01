@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { add, compare, divide, isValidDecimal, multiply, roundToStep, scaleOf, subtract, toFixed } from "./index";
+import { add, compare, divide, isValidDecimal, multiply, positive, roundToStep, sanitizeAmount, scaleOf, subtract, sum, toFixed } from "./index";
 
 /**
  * The whole reason this module exists is that the obvious implementation is wrong, so the
@@ -111,5 +111,33 @@ describe("divide", () => {
   });
   it("refuses a zero divisor", () => {
     expect(() => divide("1", "0", 2)).toThrow();
+  });
+});
+
+describe("positive", () => {
+  it("is true only for a well-formed amount above zero", () => {
+    expect(positive("0.00000001")).toBe(true);
+    expect(positive("0")).toBe(false);
+    expect(positive("-1")).toBe(false);
+    expect(positive("")).toBe(false);
+    expect(positive("1.2.3")).toBe(false);
+    expect(positive("NaN")).toBe(false);
+  });
+});
+
+describe("sum", () => {
+  it("totals exactly and gives zero for nothing", () => {
+    expect(sum(["0.1", "0.2"])).toBe("0.3");
+    expect(sum([])).toBe("0");
+    expect(sum(["1", "-1.5"])).toBe("-0.5");
+  });
+});
+
+describe("sanitizeAmount", () => {
+  it("keeps digits and the first decimal point only", () => {
+    expect(sanitizeAmount("1,234.50")).toBe("1234.50");
+    expect(sanitizeAmount("1.2.3")).toBe("1.23");
+    expect(sanitizeAmount("abc")).toBe("");
+    expect(sanitizeAmount(".5")).toBe(".5");
   });
 });

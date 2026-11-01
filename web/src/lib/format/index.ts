@@ -5,6 +5,17 @@ export function price(value: string, decimals: number): string {
   return withGrouping(toFixed(value, decimals));
 }
 
+/** Grouped at the precision the backend sent, for a column whose scale is the asset's own. */
+export function grouped(value: string): string {
+  return withGrouping(value);
+}
+
+/** A profit or loss: "+" on a gain, "-" kept on a loss, nothing on zero. */
+export function signed(value: string, decimals: number): string {
+  const fixed = price(value, decimals);
+  return fixed.startsWith("-") || /^[0,.]*$/.test(fixed) ? fixed : "+" + fixed;
+}
+
 /** Signed percent with two places, from the backend's "2.50" string. */
 export function percent(value: string): string {
   return (value.startsWith("-") ? "" : "+") + value + "%";

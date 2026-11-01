@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, percent, price } from "./index";
+import { compact, grouped, percent, price, signed } from "./index";
 
 describe("format", () => {
   it("renders a price at the market's precision with thousands grouping", () => {
@@ -10,6 +10,18 @@ describe("format", () => {
 
   it("keeps the sign on negatives and groups only the whole part", () => {
     expect(price("-1234.5", 2)).toBe("-1,234.50");
+  });
+
+  it("groups without touching the precision the backend chose", () => {
+    expect(grouped("1234567.12345678")).toBe("1,234,567.12345678");
+    expect(grouped("5")).toBe("5");
+  });
+
+  it("signs a profit, keeps a loss's sign, and leaves zero alone", () => {
+    expect(signed("1234.5", 2)).toBe("+1,234.50");
+    expect(signed("-0.004", 2)).toBe("0.00");
+    expect(signed("-0.01", 2)).toBe("-0.01");
+    expect(signed("0", 2)).toBe("0.00");
   });
 
   it("signs a percent both ways", () => {

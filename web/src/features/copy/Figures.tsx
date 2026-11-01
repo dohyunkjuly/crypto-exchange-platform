@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Empty } from "@/components/ui/Empty";
 import { useT } from "@/lib/i18n";
+import { price, signed } from "@/lib/format";
+import { tone } from "./copyMath";
 import type { LeaderStats } from "./api";
 import { Choice, PERIODS, Percent, type Period } from "./Leaders";
 import { ReturnChart } from "./ReturnChart";
@@ -16,7 +18,7 @@ export const row = (label: string, value: React.ReactNode) => (
 
 /** An amount in the copy asset, grouped; zero when there is none yet. */
 export const amount = (value: string | null | undefined, asset: string) =>
-  `${Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${asset}`;
+  `${price(value ?? "0", 2)} ${asset}`;
 
 /**
  * The nightly figures as every page shows them -- the public profile and the leader's own
@@ -36,7 +38,7 @@ export function PerformanceCard({ stats: s, children }: { stats: LeaderStats | n
       <div className="grid grid-cols-2 gap-4">
         <div><div className="text-sm text-muted">{t("copySort.return")}</div><div className="text-2xl font-semibold"><Percent value={w?.return ?? null} signed /></div></div>
         <div className="text-right"><div className="text-sm text-muted">{t("copySort.pnl")}</div>
-          <div className={`num text-2xl font-semibold ${Number(w?.pnl ?? 0) === 0 ? "" : Number(w?.pnl) > 0 ? "text-up" : "text-down"}`}>{`${Number(w?.pnl ?? 0) > 0 ? "+" : ""}${Number(w?.pnl ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</div></div>
+          <div className={`num text-2xl font-semibold ${tone(w?.pnl ?? "0")}`}>{signed(w?.pnl ?? "0", 2)}</div></div>
       </div>
       <div className="flex flex-col gap-2 border-t border-border pt-4">
         {row(t("copySort.maxDrawdown"), <Percent value={w?.maxDrawdown ?? null} />)}

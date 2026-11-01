@@ -1,5 +1,5 @@
 import type { MarketSymbol } from "@/features/markets/api";
-import { compare, divide, isValidDecimal, multiply, roundToStep, scaleOf } from "@/lib/money";
+import { compare, divide, isValidDecimal, multiply, positive, roundToStep, scaleOf } from "@/lib/money";
 
 export type Side = "BUY" | "SELL";
 export type OrderType = "LIMIT" | "LIMIT_MAKER" | "MARKET" | "STOP_LOSS" | "STOP_LOSS_LIMIT" | "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT";
@@ -16,7 +16,7 @@ export const isConditional = (t: OrderType) => CONDITIONAL.includes(t);
  */
 export const sizing = (type: OrderType, side: Side): "quote" | "base" => (isMarketFiring(type) && side === "BUY" ? "quote" : "base");
 
-export const positive = (v: string) => isValidDecimal(v) && compare(v, "0") > 0;
+export { positive };
 
 /** Price × amount, exact; "" when either is missing. */
 export function totalOf(price: string, amount: string): string {
