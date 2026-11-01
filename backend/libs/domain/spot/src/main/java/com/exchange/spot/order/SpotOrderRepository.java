@@ -136,9 +136,6 @@ public interface SpotOrderRepository extends JpaRepository<SpotOrder, UUID> {
                            @Param("anyStatus") boolean anyStatus, @Param("statuses") Collection<OrderStatus> statuses,
                            @Param("from") Instant from, @Param("to") Instant to, Pageable pageable);
 
-    /** Rebuilding the book on engine restart: every live order for one market. */
-    List<SpotOrder> findBySymbolIdAndStatusIn(Long symbolId, List<OrderStatus> statuses);
-
     /** Account-wide open-order limit (SpotExchangeOrderLimits.maxNumOrders / a
      *  SpotUserOrderLimitOverride). */
     long countByUserIdAndStatusIn(Long userId, List<OrderStatus> statuses);

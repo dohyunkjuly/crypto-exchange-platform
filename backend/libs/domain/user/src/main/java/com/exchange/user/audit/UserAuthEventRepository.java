@@ -1,7 +1,6 @@
 package com.exchange.user.audit;
 
 import java.time.Instant;
-import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -9,8 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface UserAuthEventRepository extends JpaRepository<UserAuthEvent, Long> {
 
     Page<UserAuthEvent> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
-
-    List<UserAuthEvent> findByEventTypeAndCreatedAtAfter(AuthEventType eventType, Instant after);
 
     /**
      * Brute-force detection: how many failures of ONE KIND from this address recently.

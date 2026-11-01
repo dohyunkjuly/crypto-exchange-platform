@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -13,11 +12,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface SpotTradeRepository extends JpaRepository<SpotTrade, UUID> {
-
-    /** The tape, and the source for every candle interval. */
-    Page<SpotTrade> findBySymbolIdOrderByExecutedAtDesc(Long symbolId, Pageable pageable);
-
-    List<SpotTrade> findBySymbolIdAndExecutedAtBetween(Long symbolId, Instant from, Instant to);
 
     /**
      * One market's quote volume and trade count over {@code [from, to)}, for the admin dashboard.
@@ -59,9 +53,6 @@ public interface SpotTradeRepository extends JpaRepository<SpotTrade, UUID> {
 
     /** Every fill of one order, for the order-detail view. */
     List<SpotTrade> findByBuyerOrderIdOrSellerOrderId(UUID buyerOrderId, UUID sellerOrderId);
-
-    /** The engine's replay guard — a sequence already persisted must not be applied twice. */
-    Optional<SpotTrade> findBySymbolIdAndSequence(Long symbolId, long sequence);
 
     /** The same guard as {@link #findBySymbolIdAndSequence}, checked for many sequences
      *  in one round trip instead of one per trade -- which of {@code sequences} has

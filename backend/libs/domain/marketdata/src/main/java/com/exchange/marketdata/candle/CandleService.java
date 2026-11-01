@@ -79,17 +79,6 @@ public class CandleService {
         return bars.size() <= clamp(limit) ? bars : bars.subList(bars.size() - clamp(limit), bars.size());
     }
 
-    /** A window, oldest first. Both bounds are inclusive of the buckets they fall in --
-     *  the caller gets whole candles, since half a candle is not a candle. */
-    public List<Candle> range(Market market, String symbol, CandleInterval interval,
-                              Instant from, Instant to) {
-        List<Candle> found = candles.findRange(market, symbol, interval,
-                interval.bucketStart(from), to);
-        return found.size() <= MAX_CANDLES
-                ? found
-                : found.subList(found.size() - MAX_CANDLES, found.size());
-    }
-
     private static int clamp(int limit) {
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be positive, was " + limit);

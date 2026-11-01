@@ -1,7 +1,5 @@
 package com.exchange.user.kyc;
 
-import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -16,7 +14,4 @@ public interface UserKycProfileRepository extends JpaRepository<UserKycProfile, 
 
     /** The same queue once worked: what was decided, newest decision first. */
     Page<UserKycProfile> findByStatusOrderByReviewedAtDesc(KycStatus status, Pageable pageable);
-
-    /** The re-verification sweep. */
-    List<UserKycProfile> findByStatusAndExpiresAtBefore(KycStatus status, Instant before);
 }

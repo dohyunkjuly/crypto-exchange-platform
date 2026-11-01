@@ -11,12 +11,6 @@ public interface UserMfaMethodRepository extends JpaRepository<UserMfaMethod, Lo
 
     List<UserMfaMethod> findByUserId(Long userId);
 
-    /** WebAuthn assertion arrives with a credential id and nothing else. */
-    Optional<UserMfaMethod> findByCredentialId(byte[] credentialId);
-
-    boolean existsByUserIdAndMethodTypeAndVerifiedAtIsNotNullAndRevokedAtIsNull(
-            Long userId, MfaMethodType methodType);
-
     /** The gate every sensitive operation asks: does this account have ANY active factor?
      *  Kept as a count query rather than loading the rows -- ApiKeyService and the trading
      *  gate only need the yes/no. */

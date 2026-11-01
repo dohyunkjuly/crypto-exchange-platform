@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -13,10 +12,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> {
-
-    /** The account statement. */
-    Page<LedgerEntry> findByUserIdAndAssetIdOrderByCreatedAtDesc(
-            Long userId, Long assetId, Pageable pageable);
 
     /**
      * One customer's statement across assets, newest first, for the admin console. Every filter
@@ -51,9 +46,6 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
     Slice<LedgerEntry> latest(@Param("assetId") Long assetId, @Param("type") LedgerEntryType type,
                               @Param("lo") UUID lo, @Param("hi") UUID hi, Pageable pageable);
 
-    /** "What did this trade do to balances?" -- reconciliation and support. */
-    List<LedgerEntry> findByReferenceTypeAndReferenceId(ReferenceType type, String referenceId);
-
     /** Cheaper than catching the unique-constraint violation when replaying a Kafka event. */
     boolean existsByIdempotencyKey(String idempotencyKey);
 
@@ -65,14 +57,6 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
     @Query("SELECT e.idempotencyKey FROM LedgerEntry e WHERE e.idempotencyKey IN :idempotencyKeys")
     List<String> findExistingIdempotencyKeys(
             @Param("idempotencyKeys") Collection<String> idempotencyKeys);
-
-    /**
-     * Rebuilds a balance from the ledger. The ledger is the truth and wallet_balances is a
-     * projection of it, so this is what reconciliation compares against.
-     */
-    @Query("SELECT COALESCE(SUM(e.amount), 0) FROM LedgerEntry e "
-            + "WHERE e.userId = :userId AND e.assetId = :assetId")
-    long sumAmountByUserIdAndAssetId(@Param("userId") Long userId, @Param("assetId") Long assetId);
 
     /**
      * Customer-side fee flow over {@code [from, to)}, grouped by asset and type, for the

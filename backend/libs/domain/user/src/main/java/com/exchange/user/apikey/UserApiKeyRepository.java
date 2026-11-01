@@ -20,8 +20,6 @@ public interface UserApiKeyRepository extends JpaRepository<UserApiKey, UUID> {
     /** A master's sub-accounts at once, so one screen of their keys is one query rather than one each. */
     List<UserApiKey> findByUserIdInOrderByCreatedAtDesc(Collection<Long> userIds);
 
-    List<UserApiKey> findByUserIdAndRevokedAtIsNull(Long userId);
-
     /** One column, no entity load: the auth path calls this and must not pay for a read. */
     @Modifying
     @Query("update UserApiKey k set k.lastUsedAt = :at where k.id = :id")
