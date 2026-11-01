@@ -38,20 +38,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class OrderQueryService {
 
-    /**
-     * What "open" means: still live in the engine, in some form.
-     *
-     * <p>{@code PENDING_TRIGGER} counts -- a stop order waiting for its trigger price is
-     * not resting on the book, but the user placed it, it holds their funds locked, and
-     * they must be able to see and cancel it. Leaving it out would make locked balance
-     * unexplainable from the order list. {@code PENDING_CANCEL} counts for the same
-     * reason: the cancel has been asked for but the engine has not confirmed it, so the
-     * order is still capable of filling.
-     */
-    private static final List<OrderStatus> OPEN_STATUSES = List.of(
-            OrderStatus.PENDING_TRIGGER, OrderStatus.NEW,
-            OrderStatus.PARTIALLY_FILLED, OrderStatus.PENDING_CANCEL);
-
     private final SpotOrderRepository spotOrders;
     private final SpotSymbolRepository spotSymbols;
 
@@ -66,7 +52,7 @@ public class OrderQueryService {
         // which is sorted in the database. Sorted here rather than by adding a second
         // repository method, because an open-order list is bounded by the account's
         // open-order cap (a few hundred at most), not by history.
-        return withSymbols(spotOrders.findByUserIdAndStatusIn(userId, OPEN_STATUSES).stream()
+        return withSymbols(spotOrders.findByUserIdAndStatusIn(userId, OrderStatus.OPEN).stream()
                 .sorted(Comparator.comparing(SpotOrder::getCreatedAt).reversed())
                 .toList());
     }

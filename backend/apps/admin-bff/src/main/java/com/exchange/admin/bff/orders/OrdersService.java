@@ -39,8 +39,6 @@ import org.springframework.stereotype.Service;
 public class OrdersService {
 
     private static final int MAX_PAGE = 100;
-    private static final Set<OrderStatus> OPEN = EnumSet.of(OrderStatus.PENDING_TRIGGER, OrderStatus.NEW,
-            OrderStatus.PARTIALLY_FILLED, OrderStatus.PENDING_CANCEL);
 
     private final SpotOrderRepository orders;
     private final SpotTradeRepository trades;
@@ -101,7 +99,7 @@ public class OrdersService {
             return null;
         }
         if (state.equalsIgnoreCase("open")) {
-            return OPEN;
+            return EnumSet.copyOf(OrderStatus.OPEN);
         }
         if (state.equalsIgnoreCase("closed")) {
             return Arrays.stream(OrderStatus.values()).filter(OrderStatus::isTerminal)

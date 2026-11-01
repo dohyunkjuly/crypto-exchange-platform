@@ -29,7 +29,6 @@ import com.exchange.wallet.balance.Balance;
 import com.exchange.wallet.balance.BalanceRepository;
 import com.exchange.wallet.transfer.TransferService;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -48,9 +47,6 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class CopyCloseService {
-
-    private static final List<OrderStatus> OPEN = List.of(OrderStatus.PENDING_TRIGGER, OrderStatus.NEW,
-            OrderStatus.PARTIALLY_FILLED, OrderStatus.PENDING_CANCEL);
 
     private final CopyFollowRepository follows;
     private final CopyOrderRepository copyOrders;
@@ -113,7 +109,7 @@ public class CopyCloseService {
      * @throws LeadAccountNotFlatException an order is open, or a holding is worth selling
      */
     public void requireFlat(Long leadUserId) {
-        if (orders.countByUserIdAndStatusIn(leadUserId, OPEN) > 0) {
+        if (orders.countByUserIdAndStatusIn(leadUserId, OrderStatus.OPEN) > 0) {
             throw new LeadAccountNotFlatException("the lead account has an order open");
         }
         long threshold = settings.findById(CopySettings.SINGLETON_ID).orElseThrow().getCloseSellThreshold();
@@ -171,7 +167,7 @@ public class CopyCloseService {
     public boolean finishIfSettled(UUID followId) {
         CopyFollow follow = follows.findById(followId).orElseThrow();
         if (follow.getStatus() != FollowStatus.CLOSING
-                || orders.countByUserIdAndStatusIn(follow.getCopyUserId(), OPEN) > 0) {
+                || orders.countByUserIdAndStatusIn(follow.getCopyUserId(), OrderStatus.OPEN) > 0) {
             return false;
         }
         if (balances.findByUserId(follow.getCopyUserId()).stream().anyMatch(balance -> balance.getLocked() > 0)) {

@@ -82,18 +82,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class OrderService {
 
-    private static final List<OrderStatus> OPEN_STATUSES = List.of(
-            OrderStatus.PENDING_TRIGGER, OrderStatus.NEW,
-            OrderStatus.PARTIALLY_FILLED, OrderStatus.PENDING_CANCEL);
-
-    /** Open, minus PENDING_CANCEL: its cancel is already on its way. */
-    private static final List<OrderStatus> CANCELABLE_STATUSES = List.of(
-            OrderStatus.PENDING_TRIGGER, OrderStatus.NEW, OrderStatus.PARTIALLY_FILLED);
-
-    private static final List<OrderType> CONDITIONAL_TYPES = List.of(
-            OrderType.STOP_LOSS, OrderType.STOP_LOSS_LIMIT,
-            OrderType.TAKE_PROFIT, OrderType.TAKE_PROFIT_LIMIT);
-
     private static final List<OrderType> LIMIT_PRICED_TYPES = List.of(
             OrderType.LIMIT, OrderType.LIMIT_MAKER,
             OrderType.STOP_LOSS_LIMIT, OrderType.TAKE_PROFIT_LIMIT);
@@ -288,7 +276,7 @@ public class OrderService {
         commandPartitions.requireExists(spotSymbol);
         requireEngine(spotSymbol);
 
-        boolean isConditional = CONDITIONAL_TYPES.contains(orderType);
+        boolean isConditional = orderType.isConditional();
         boolean isMarketFiring = MARKET_FIRING_TYPES.contains(orderType);
         boolean isBuy = side == Side.BUY;
 
@@ -519,7 +507,7 @@ public class OrderService {
         SpotOrder order = spotOrders.findById(orderId)
                 .filter(o -> o.getUserId().equals(userId))
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
-        if (!CANCELABLE_STATUSES.contains(order.getStatus())) {
+        if (!OrderStatus.CANCELABLE.contains(order.getStatus())) {
             throw new OrderNotAmendableException("order is " + order.getStatus());
         }
         boolean parked = order.getStatus() == OrderStatus.PENDING_TRIGGER;
@@ -588,7 +576,7 @@ public class OrderService {
             throw new NotionalOutOfRangeException();
         }
 
-        if (spotOrders.claimAmend(orderId, CANCELABLE_STATUSES) == 0) {
+        if (spotOrders.claimAmend(orderId, OrderStatus.CANCELABLE) == 0) {
             // Lost a race since the read above: to another amend, or to a fill or a cancel.
             throw order.isAmendPending() || spotOrders.isAmendPending(orderId)
                     ? new AmendPendingException()
@@ -698,7 +686,7 @@ public class OrderService {
             }
         }
         Long onlySymbol = symbolId;
-        List<SpotOrder> matching = spotOrders.findByUserIdAndStatusIn(userId, CANCELABLE_STATUSES)
+        List<SpotOrder> matching = spotOrders.findByUserIdAndStatusIn(userId, OrderStatus.CANCELABLE)
                 .stream()
                 .filter(o -> onlySymbol == null || o.getSymbolId().equals(onlySymbol))
                 .filter(o -> side == null || o.getSide() == side)
@@ -805,7 +793,7 @@ public class OrderService {
                 .filter(Objects::nonNull)
                 .orElse(symbol.getMaxOpenOrders());
         long symbolOpen = spotOrders.countByUserIdAndSymbolIdAndStatusIn(
-                userId, symbol.getId(), OPEN_STATUSES);
+                userId, symbol.getId(), OrderStatus.OPEN);
         if (symbolOpen >= symbolCap) {
             throw new OrderLimitExceededException();
         }
@@ -818,7 +806,7 @@ public class OrderService {
         int accountCap = accountOverride.map(SpotUserOrderLimitOverride::getMaxNumOrders)
                 .filter(Objects::nonNull)
                 .orElse(defaults.getMaxNumOrders());
-        long accountOpen = spotOrders.countByUserIdAndStatusIn(userId, OPEN_STATUSES);
+        long accountOpen = spotOrders.countByUserIdAndStatusIn(userId, OrderStatus.OPEN);
         if (accountOpen >= accountCap) {
             throw new OrderLimitExceededException();
         }
@@ -832,7 +820,7 @@ public class OrderService {
                 .filter(Objects::nonNull)
                 .orElse(symbol.getMaxOpenConditionalOrders());
         long symbolAlgoOpen = spotOrders.countByUserIdAndSymbolIdAndOrderTypeInAndStatusIn(
-                userId, symbol.getId(), CONDITIONAL_TYPES, OPEN_STATUSES);
+                userId, symbol.getId(), OrderType.CONDITIONAL, OrderStatus.OPEN);
         if (symbolAlgoOpen >= symbolAlgoCap) {
             throw new AlgoOrderLimitExceededException();
         }
@@ -841,7 +829,7 @@ public class OrderService {
                 .filter(Objects::nonNull)
                 .orElse(defaults.getMaxNumAlgoOrders());
         long accountAlgoOpen = spotOrders.countByUserIdAndOrderTypeInAndStatusIn(
-                userId, CONDITIONAL_TYPES, OPEN_STATUSES);
+                userId, OrderType.CONDITIONAL, OrderStatus.OPEN);
         if (accountAlgoOpen >= accountAlgoCap) {
             throw new AlgoOrderLimitExceededException();
         }
