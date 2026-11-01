@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Confirm } from "@/components/Confirm";
 import { CodeInput, Dialog, Field, useBusy } from "@/components/Dialog";
+import { Shell } from "@/components/Shell";
 import { Table } from "@/components/Table";
 import { AdminApiError } from "@/lib/api";
 import { useAdmin } from "@/lib/session";
@@ -15,6 +16,8 @@ type Pending =
  * The staff themselves: SUPERADMIN only (docs/reference/admin.md). Minting a login and resetting
  * an authenticator take a fresh code -- they are how someone else becomes able to act here.
  * Nothing on this page acts on your own row; admin-bff refuses it too.
+ *
+ * <p>Renders its own Shell, unlike the other pages, so "Add admin" can sit in the title row.
  */
 export function Admins() {
   const me = useAdmin();
@@ -30,21 +33,18 @@ export function Admins() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  if (error) return <p role="alert" className="text-danger">{error}</p>;
-  if (!staff || !me) return <p className="text-dim" aria-busy>Loading…</p>;
+  if (error) return <Shell title="Admins"><p role="alert" className="text-danger">{error}</p></Shell>;
+  if (!staff || !me) return <Shell title="Admins"><p className="text-dim" aria-busy>Loading…</p></Shell>;
   const done = (message: string) => { setPending(null); setNotice(message); load(); };
 
   return (
-    <>
+    <Shell title="Admins" actions={<button className="btn btn-primary" onClick={() => setPending({ kind: "create" })}>Add admin</button>}>
       {notice && <p role="status" className="m-0 rounded-md border border-[var(--success-border)] bg-success-bg px-4 py-2.5 text-success">{notice}</p>}
 
       <Table
         empty="No admins."
         head={["Admin", "Role", "Authenticator", "State", "Created", ""]}
-        footer={<>
-          <span>{staff.length} admin{staff.length === 1 ? "" : "s"}</span>
-          <button className="btn btn-sm btn-primary" onClick={() => setPending({ kind: "create" })}>Add admin</button>
-        </>}
+        footer={<span>{staff.length} admin{staff.length === 1 ? "" : "s"}</span>}
         rows={staff.map((s) => {
           const self = s.id === me.id;
           const disabled = !!s.disabledAt;
@@ -91,7 +91,7 @@ export function Admins() {
                  onConfirm={async () => { await disableAdmin(pending.staff.id); done(`${pending.staff.email} disabled.`); }}
                  onClose={() => setPending(null)} />
       )}
-    </>
+    </Shell>
   );
 }
 

@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ fetchAdmins: vi.fn(), createAdmin: vi.fn(), changeRole: vi.fn(), disableAdmin: vi.fn(), resetTotp: vi.fn() }));
 vi.mock("./api", async (orig) => ({ ...(await orig<object>()), ...api }));
-vi.mock("@/lib/session", () => ({ useAdmin: () => ({ id: 1, email: "root@x.dev", role: "SUPERADMIN" }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/admins",
+}));
+vi.mock("@/lib/session", () => ({ useAdmin: () => ({ id: 1, email: "root@x.dev", role: "SUPERADMIN" }), logout: vi.fn() }));
 const { Admins } = await import("./Admins");
 
 const me = { id: 1, email: "root@x.dev", role: "SUPERADMIN", totpEnrolled: true, disabledAt: null, createdAt: "2026-09-01T00:00:00Z" };
@@ -16,7 +20,10 @@ afterEach(() => vi.clearAllMocks());
 describe("Admins", () => {
   it("offers nothing on your own row, and everything on a colleague's", async () => {
     render(<Admins />);
-    const mine = (await screen.findByText("root@x.dev")).closest("tr")!;
+    // The Shell's header shows your email too, before the table has loaded: wait for the
+    // table, then take the row marked "you".
+    await screen.findByText("ops@x.dev");
+    const mine = screen.getByText("you").closest("tr")!;
     expect(within(mine).queryByRole("button")).toBeNull();
     expect(within(mine).queryByRole("combobox")).toBeNull();
 
